@@ -1,0 +1,3 @@
+# Normalise line endings so Windows (core.autocrlf=true) and Linux CI produce
+# identical files and diffs.
+* text=auto eol=lf

@@ -1,0 +1,11 @@
+# Development and CI dependencies (pinned). Justification:
+#   pytest  test runner
+#   httpx2  HTTP client required by FastAPI/Starlette's TestClient
+#           (Starlette deprecates the original `httpx` in favour of `httpx2`)
+#   ruff    linting (incl. flake8-bandit security rules) and formatting
+#   mypy    static type checking
+-r requirements.txt
+httpx2==2.13.0
+mypy==2.3.1
+pytest==9.1.1
+ruff==0.16.7

@@ -1,0 +1,9 @@
+# Runtime dependencies (pinned). Justification:
+#   fastapi            HTTP framework chosen for the backend
+#   pydantic           request/response models and validation (FastAPI's model layer)
+#   pydantic-settings  environment-based configuration
+#   uvicorn            ASGI server to run the app
+fastapi==0.141.1
+pydantic==2.13.5
+pydantic-settings==2.15.0
+uvicorn==0.53.0
