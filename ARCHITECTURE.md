@@ -4,7 +4,7 @@ This document separates what **exists now** from what is **planned**. Planned
 components are design intent, not implementations. They are subject to change as
 each phase is designed in detail.
 
-- **Document status:** Phase 0 (project initialization)
+- **Document status:** Phase 1 (frontend and UI)
 - **Last updated:** 2026-09-15
 
 ---
@@ -17,7 +17,7 @@ Two independent development services and no shared infrastructure:
 
 ```
 Browser ──► Vite dev server (127.0.0.1:5173)
-              │  serves the React status page
+              │  serves the React app (demo data via in-memory services)
               └─ proxies /api/* ──► FastAPI (127.0.0.1:8000)
                                       └─ GET /api/v1/health
 ```
@@ -56,20 +56,18 @@ and reach the outside world only through gateways that apply policy.
 
 ### Current implementation
 
-- React 19 + TypeScript 6 (`strict`, `noUncheckedIndexedAccess`) built with Vite 8.
-- A single page (`src/pages/StatusPage.tsx`) that shows the development notice,
-  the frontend status, and the backend status from `GET /api/v1/health`.
-- `src/api/health.ts` validates the response shape at runtime and treats anything
-  unexpected as "unreachable". Requests time out after 5 seconds.
-- The dev server binds to `127.0.0.1` and proxies `/api` to `127.0.0.1:8000`, so no
-  CORS configuration is needed.
-- Tooling: ESLint 10 (typescript-eslint, react-hooks, react-refresh), Vitest 5 with
-  jsdom and Testing Library.
-- No router, state library, design system or authentication.
+Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
+
+- **Stack:** React 19, strict TypeScript 6, Vite 8, Tailwind CSS 4 design tokens (light/dark), React Router with lazy routes and route error boundaries, TanStack Query, Zustand (theme, sidebar, toasts only), React Hook Form + Zod, lucide-react.
+- **Pages:** dashboard, agents (list, details, create, edit), marketplace, executions (list, details), security, analytics, settings, 404.
+- **Service layer:** typed contracts in `src/services/contracts.ts`, consumed through `useServices()`. Every contract has an in-memory **demo implementation** (`src/services/demo`). Demo data is centralised in `src/features/demo`, and ESLint forbids UI code from importing it.
+- **HTTP client:** `src/services/http/client.ts` is the only `fetch` wrapper. It enforces absolute API paths, a timeout, no credential headers, Zod response validation and typed errors. Its only real use is the Settings connection test against `GET /api/v1/health`.
+- **Dev server:** binds to `127.0.0.1` and proxies `/api` to `127.0.0.1:8000`, so no CORS configuration is needed.
+- **Not implemented:** backend integration for application data, authentication, real execution, real security scanning.
 
 ### Planned architecture
 
-- Application shell with routing, layouts and a design system (Phase 1).
+- HTTP implementations of the existing service contracts (Phase 2).
 - A typed API client generated from, or validated against, the backend's OpenAPI
   schema, and server-state caching with explicit loading, error and empty states.
 - Authentication-aware routing and capability-aware UI (Phase 3). This is UX only;
@@ -187,7 +185,7 @@ None. `agents/sandbox/` is an empty placeholder.
 - Backend: secure defaults (production mode unless configured, API docs off outside
   development, no CORS, loopback binding in documented commands). Ruff security
   lint rules.
-- Frontend: strict TypeScript, runtime validation of the one API response it
+- Frontend: strict TypeScript, runtime validation of API responses (Zod) and form input it
   consumes, no secrets in browser code.
 - CI runs with read-only repository permissions and does not persist checkout
   credentials.

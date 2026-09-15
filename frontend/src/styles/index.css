@@ -1,0 +1,194 @@
+@import 'tailwindcss';
+
+/* Dark mode is class-based so the user's explicit theme choice wins. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   AgentHub design tokens.
+   Components use semantic utilities only (bg-surface, text-fg-muted,
+   border-line, bg-danger-soft …), never raw palette colours. Light is the
+   default; `.dark` on <html> swaps the underlying variables.
+   Text/background pairs were chosen to meet WCAG AA (4.5:1) in both themes.
+--------------------------------------------------------------------------- */
+:root {
+  --ah-canvas: #f5f6f8;
+  --ah-surface: #ffffff;
+  --ah-surface-muted: #f0f2f5;
+  --ah-surface-hover: #e9ecf1;
+  --ah-line: #e1e4ea;
+  --ah-line-strong: #c9ced8;
+  --ah-fg: #111827;
+  --ah-fg-muted: #4b5563;
+  --ah-fg-subtle: #5f6775;
+
+  --ah-brand: #4f46e5;
+  --ah-brand-hover: #4338ca;
+  --ah-brand-fg: #ffffff;
+  --ah-brand-soft: #eef0ff;
+  --ah-brand-strong: #3730a3;
+
+  --ah-success: #047857;
+  --ah-success-soft: #e9f8f1;
+  --ah-warning: #a15c07;
+  --ah-warning-soft: #fdf6e3;
+  --ah-high: #c2410c;
+  --ah-high-soft: #fff3ea;
+  --ah-danger: #b91c1c;
+  --ah-danger-soft: #fdeeee;
+  --ah-danger-fg: #ffffff;
+  --ah-info: #1d4ed8;
+  --ah-info-soft: #eaf1fe;
+
+  --ah-ring: #4f46e5;
+  --ah-overlay: rgb(15 23 42 / 0.5);
+  --ah-shadow: rgb(15 23 42 / 0.08);
+  color-scheme: light;
+}
+
+.dark {
+  --ah-canvas: #0a0d14;
+  --ah-surface: #11151f;
+  --ah-surface-muted: #171c28;
+  --ah-surface-hover: #1e2433;
+  --ah-line: #242b3a;
+  --ah-line-strong: #343d50;
+  --ah-fg: #e7eaf0;
+  --ah-fg-muted: #aab2c0;
+  --ah-fg-subtle: #8d96a6;
+
+  --ah-brand: #8b93ff;
+  --ah-brand-hover: #a2a8ff;
+  --ah-brand-fg: #0b0d1a;
+  --ah-brand-soft: #1c1e3d;
+  --ah-brand-strong: #c7ccff;
+
+  --ah-success: #4ade80;
+  --ah-success-soft: #0f2a1d;
+  --ah-warning: #fbbf24;
+  --ah-warning-soft: #2b220c;
+  --ah-high: #fb923c;
+  --ah-high-soft: #2e1b0e;
+  --ah-danger: #f87171;
+  --ah-danger-soft: #2e1416;
+  --ah-danger-fg: #1a0708;
+  --ah-info: #60a5fa;
+  --ah-info-soft: #0f1e36;
+
+  --ah-ring: #8b93ff;
+  --ah-overlay: rgb(0 0 0 / 0.65);
+  --ah-shadow: rgb(0 0 0 / 0.4);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --color-canvas: var(--ah-canvas);
+  --color-surface: var(--ah-surface);
+  --color-surface-muted: var(--ah-surface-muted);
+  --color-surface-hover: var(--ah-surface-hover);
+  --color-line: var(--ah-line);
+  --color-line-strong: var(--ah-line-strong);
+  --color-fg: var(--ah-fg);
+  --color-fg-muted: var(--ah-fg-muted);
+  --color-fg-subtle: var(--ah-fg-subtle);
+
+  --color-brand: var(--ah-brand);
+  --color-brand-hover: var(--ah-brand-hover);
+  --color-brand-fg: var(--ah-brand-fg);
+  --color-brand-soft: var(--ah-brand-soft);
+  --color-brand-strong: var(--ah-brand-strong);
+
+  --color-success: var(--ah-success);
+  --color-success-soft: var(--ah-success-soft);
+  --color-warning: var(--ah-warning);
+  --color-warning-soft: var(--ah-warning-soft);
+  --color-high: var(--ah-high);
+  --color-high-soft: var(--ah-high-soft);
+  --color-danger: var(--ah-danger);
+  --color-danger-soft: var(--ah-danger-soft);
+  --color-danger-fg: var(--ah-danger-fg);
+  --color-info: var(--ah-info);
+  --color-info-soft: var(--ah-info-soft);
+
+  --color-ring: var(--ah-ring);
+  --color-overlay: var(--ah-overlay);
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --shadow-card: 0 1px 2px 0 var(--ah-shadow);
+  --shadow-raised: 0 4px 16px -4px var(--ah-shadow), 0 2px 6px -2px var(--ah-shadow);
+  --shadow-overlay: 0 24px 48px -12px var(--ah-shadow);
+
+  --animate-fade-in: fade-in 160ms ease-out both;
+  --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-sm text-fg antialiased;
+  }
+
+  *,
+  ::before,
+  ::after {
+    border-color: var(--ah-line);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ah-ring);
+    outline-offset: 2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  dialog::backdrop {
+    background: var(--ah-overlay);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

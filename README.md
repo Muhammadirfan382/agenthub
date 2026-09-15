@@ -24,28 +24,32 @@ aims to make that safe to do inside an organization by combining two things:
 | Phase | Name | Status |
 | --- | --- | --- |
 | 0 | Project initialization | ✅ Complete |
-| 1–10 | Frontend, backend, auth, registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
+| 1 | Frontend and UI (demonstration data) | ✅ Complete |
+| 2–10 | Backend, auth, registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phase 0):**
+**What exists today (Phases 0–1):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
   ([docs/ROADMAP.md](docs/ROADMAP.md)).
-- A minimal React + TypeScript + Vite frontend with a single **status page** that
-  reports whether the frontend and backend are running.
+- A React + TypeScript frontend ([docs/FRONTEND.md](docs/FRONTEND.md)):
+  - Screens: application shell, dashboard, agent management (list, details, create/edit), marketplace, executions (list and detail), security dashboard, analytics and settings.
+  - Foundations: a reusable design system and a typed service layer.
+  - Data: everything runs on **clearly labelled demonstration data**. The only real backend call is the connection test in Settings.
 - A minimal FastAPI backend with one endpoint: `GET /api/v1/health`.
-- Unit tests (Vitest + Testing Library, pytest), linting and type checking.
+- Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
-**What does not exist yet:** authentication, authorization, a database, an agent
-registry or marketplace, agent execution, sandboxing, LLM integration, monitoring
-and deployment. Directories for these areas are placeholders.
+**What does not exist yet:** backend integration for the UI, authentication,
+authorization, a database, a real agent registry, agent execution, sandboxing, LLM
+integration, security scanning, monitoring and deployment. Directories for these
+areas are placeholders.
 
 ## Technology stack
 
 | Area | Current (Phase 0) | Planned |
 | --- | --- | --- |
-| Frontend | React 19, TypeScript 6 (strict), Vite 8, ESLint 10, Vitest 5, Testing Library | Routing, server-state management and a design system (Phase 1) |
+| Frontend | React 19, TypeScript 6 (strict), Vite 8, Tailwind CSS 4, React Router, TanStack Query, Zustand, React Hook Form, Zod, lucide-react, ESLint 10, Vitest 5, Testing Library | HTTP service implementations against the real backend (Phase 2), authentication-aware UI (Phase 3) |
 | Backend | Python, FastAPI, Pydantic v2, pydantic-settings, Uvicorn, pytest, Ruff, mypy | Domain services, persistence, background jobs |
 | Database | — | PostgreSQL |
 | Cache / queue | — | Redis |
@@ -103,8 +107,9 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. The status page calls the backend through the Vite
-development proxy.
+Open `http://127.0.0.1:5173`. The UI works without the backend because it uses demo
+data. To check the real connection, start the backend and use **Settings → API → Test
+connection**, which calls it through the Vite development proxy.
 
 **Windows note:** the npm scripts invoke tools via `node node_modules/...` rather
 than `npx` or `.bin` shims, because `cmd.exe` mis-parses shim paths containing `&`
@@ -136,10 +141,13 @@ The same checks run in CI (`.github/workflows/ci.yml`).
 
 ```
 AgentHub/
-├── frontend/              React + TypeScript + Vite application
-│   ├── src/api/           API client functions (health check)
-│   ├── src/pages/         Pages (status page)
-│   └── src/test/          Test setup
+├── frontend/              React + TypeScript + Vite application (see docs/FRONTEND.md)
+│   ├── src/app/           Router, providers, query client
+│   ├── src/components/    Design system, layout, feedback and status components
+│   ├── src/features/      Product areas (dashboard, agents, marketplace, …) and demo data
+│   ├── src/services/      Service contracts, demo implementations, HTTP client
+│   ├── src/stores/        Zustand stores (theme/sidebar, toasts)
+│   └── src/test/          Test setup and render harness
 ├── backend/               FastAPI service
 │   ├── app/core/          Environment-based configuration
 │   ├── app/api/v1/        Versioned API routes (health)

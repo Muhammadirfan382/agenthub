@@ -166,6 +166,15 @@ python -m venv .venv
 - Never use `dangerouslySetInnerHTML` with untrusted content. Sanitize any future
   Markdown/HTML rendering of agent output.
 - Only `https:`, `mailto:` or relative URLs in links built from data.
+- All data flows through the service layer. Route a request as page → feature hook
+  (`features/<area>/api.ts`) → `useServices()` → contract.
+  - Components never call `fetch` (use `services/http/client.ts`).
+  - Components never import `src/features/demo` (enforced by ESLint).
+- Use `QueryState` / `LoadingState` / `EmptyState` / `ErrorState` for data views, and
+  label demonstration data with `DemoNotice` or `DemoBadge`.
+- Zustand is only for genuinely shared client state (theme, sidebar, toasts). Keep
+  server data in TanStack Query, and view state in the URL or local state.
+- See [docs/FRONTEND.md](docs/FRONTEND.md) for the frontend architecture.
 
 ### Backend
 

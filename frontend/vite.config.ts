@@ -1,3 +1,5 @@
+import { fileURLToPath, URL } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
@@ -6,7 +8,10 @@ import { defineConfig } from 'vitest/config';
 const BACKEND_DEV_URL = 'http://127.0.0.1:8000';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   server: {
     host: '127.0.0.1',
     port: 5173,
@@ -23,11 +28,25 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    rolldownOptions: {
+      output: {
+        // Stable vendor chunks cache well across deploys and keep the entry small.
+        codeSplitting: {
+          groups: [
+            { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/ },
+            { name: 'vendor-data', test: /node_modules[\\/](@tanstack|zustand)[\\/]/ },
+            { name: 'vendor-forms', test: /node_modules[\\/](react-hook-form|@hookform|zod)[\\/]/ },
+            { name: 'vendor-icons', test: /node_modules[\\/]lucide-react[\\/]/ },
+          ],
+        },
+      },
+    },
   },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
+    testTimeout: 15000,
   },
 });

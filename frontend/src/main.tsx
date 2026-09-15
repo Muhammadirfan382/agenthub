@@ -1,7 +1,11 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
-import './styles.css';
+import { App } from './app/App';
+import { applyTheme, useUiStore } from './stores/uiStore';
+import './styles/index.css';
+
+// Apply the saved theme before the first render to avoid a flash of the wrong theme.
+applyTheme(useUiStore.getState().theme);
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
