@@ -5,6 +5,7 @@ import { TabPanel, Tabs } from '@/components/ui/Tabs';
 import { AgentPreferencesSettings } from './sections/AgentPreferencesSettings';
 import { ApiSettings } from './sections/ApiSettings';
 import { AppearanceSettings } from './sections/AppearanceSettings';
+import { MembersSettings } from './sections/MembersSettings';
 import { NotificationSettings } from './sections/NotificationSettings';
 import { ProfileSettings } from './sections/ProfileSettings';
 import { SecuritySettings } from './sections/SecuritySettings';
@@ -14,6 +15,7 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'security', label: 'Security' },
+  { id: 'members', label: 'Members' },
   { id: 'api', label: 'API' },
   { id: 'agents', label: 'Agent preferences' },
 ] as const;
@@ -28,7 +30,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Your profile, appearance, notifications, security, API access and agent defaults." />
+      <PageHeader title="Settings" description="Your profile, appearance, notifications, security, members, API access and agent defaults." />
       <Tabs
         label="Settings sections"
         idPrefix={idPrefix}
@@ -41,6 +43,7 @@ export default function SettingsPage() {
         {section === 'appearance' && <AppearanceSettings />}
         {section === 'notifications' && <NotificationSettings />}
         {section === 'security' && <SecuritySettings />}
+        {section === 'members' && <MembersSettings />}
         {section === 'api' && <ApiSettings />}
         {section === 'agents' && <AgentPreferencesSettings />}
       </TabPanel>

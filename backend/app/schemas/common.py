@@ -15,3 +15,13 @@ class CamelModel(BaseModel):
         extra="forbid",
         str_strip_whitespace=True,
     )
+
+
+class SecretCamelModel(BaseModel):
+    """For bodies carrying a password: whitespace is part of the value."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )

@@ -1,14 +1,17 @@
 import { useNavigate } from 'react-router';
 import { DataNotice } from '@/components/feedback/DemoNotice';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { Alert } from '@/components/ui/Alert';
 import { toast } from '@/stores/toastStore';
 import { useCreateAgent } from './api';
+import { useAgentPermissions } from './permissions';
 import { AgentForm } from './form/AgentForm';
 import { defaultAgentFormValues, toAgentDraft } from './form/schema';
 
 export default function CreateAgentPage() {
   const navigate = useNavigate();
   const create = useCreateAgent();
+  const { canCreate } = useAgentPermissions();
 
   return (
     <>
@@ -17,6 +20,12 @@ export default function CreateAgentPage() {
         description="Configure identity, model, tools, permissions, limits and security policy."
         breadcrumbs={[{ label: 'Agents', to: '/agents' }, { label: 'Create agent' }]}
       />
+      {!canCreate && (
+        <Alert tone="warning" title="Your role cannot create agents" className="mb-6">
+          Ask an administrator of this organization for the member role or higher. The API refuses
+          this request regardless of what this page shows.
+        </Alert>
+      )}
       <DataNotice
         resource="agents"
         className="mb-6"
@@ -24,6 +33,7 @@ export default function CreateAgentPage() {
         live="The agent is saved to the AgentHub database. Permissions here are configuration only: no runtime enforces them yet."
       />
       <AgentForm
+        disabled={!canCreate}
         defaultValues={defaultAgentFormValues}
         submitLabel="Create agent"
         cancelTo="/agents"

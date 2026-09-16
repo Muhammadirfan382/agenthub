@@ -1,6 +1,7 @@
 import { Activity, Plus } from 'lucide-react';
 import { DataNotice } from '@/components/feedback/DemoNotice';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { useAgentPermissions } from '@/features/agents/permissions';
 import { LinkButton } from '@/components/ui/Button';
 import { MetricsGrid } from './components/MetricsGrid';
 import { RecentActivity } from './components/RecentActivity';
@@ -8,6 +9,8 @@ import { RecentAgents } from './components/RecentAgents';
 import { SystemStatusCard } from './components/SystemStatusCard';
 
 export default function DashboardPage() {
+  const { canCreate } = useAgentPermissions();
+
   return (
     <>
       <PageHeader
@@ -19,10 +22,12 @@ export default function DashboardPage() {
               <Activity aria-hidden="true" className="size-4" />
               View executions
             </LinkButton>
-            <LinkButton to="/agents/create" variant="primary" size="sm">
-              <Plus aria-hidden="true" className="size-4" />
-              Create agent
-            </LinkButton>
+            {canCreate && (
+              <LinkButton to="/agents/create" variant="primary" size="sm">
+                <Plus aria-hidden="true" className="size-4" />
+                Create agent
+              </LinkButton>
+            )}
           </>
         }
       />

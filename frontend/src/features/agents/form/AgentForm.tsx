@@ -33,10 +33,19 @@ interface AgentFormProps {
   submitLabel: string;
   cancelTo: string;
   submitting: boolean;
+  /** Set when the signed-in role may not save: the form stays readable but inert. */
+  disabled?: boolean;
   onSubmit: (values: AgentFormValues) => void;
 }
 
-export function AgentForm({ defaultValues, submitLabel, cancelTo, submitting, onSubmit }: AgentFormProps) {
+export function AgentForm({
+  defaultValues,
+  submitLabel,
+  cancelTo,
+  submitting,
+  disabled = false,
+  onSubmit,
+}: AgentFormProps) {
   const form = useForm<AgentFormInput, unknown, AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
     defaultValues,
@@ -98,7 +107,7 @@ export function AgentForm({ defaultValues, submitLabel, cancelTo, submitting, on
             <LinkButton to={cancelTo} variant="secondary">
               Cancel
             </LinkButton>
-            <Button type="submit" variant="primary" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting} disabled={disabled}>
               {submitLabel}
             </Button>
           </div>

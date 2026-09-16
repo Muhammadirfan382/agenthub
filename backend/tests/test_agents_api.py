@@ -22,7 +22,8 @@ class TestCreate:
         assert agent["verification"] == "unverified"
         assert agent["riskLevel"] == "low"
         assert agent["riskScore"] == 5
-        assert agent["creator"]["name"] == "Demo User"
+        # Attributed to the signed-in user, not to anything the client sent.
+        assert agent["creator"]["name"] == "Admin Person"
         assert agent["versions"][0]["version"] == "1.0.0"
         assert {check["status"] for check in agent["securityChecks"]} == {"not_run"}
         assert all(permission["scope"] == "Not granted" for permission in agent["permissions"])

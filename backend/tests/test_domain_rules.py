@@ -2,6 +2,16 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import DEV_DATABASE_URL, Settings
+from app.core.errors import ForbiddenError
+from app.core.rate_limit import SlidingWindowLimiter
+from app.core.security import (
+    configure_password_cost,
+    hash_password,
+    hash_token,
+    new_session_token,
+    verify_password,
+)
+from app.services.authorization import can, has_role, require
 from app.services.risk import derive_risk, permission_risk
 
 
@@ -51,6 +61,15 @@ class TestSettings:
         assert settings.resolved_database_url == DEV_DATABASE_URL
         assert settings.is_sqlite is True
 
+    def test_production_refuses_weak_password_hashing(self) -> None:
+        with pytest.raises(ValidationError, match="PASSWORD_HASH_COST_EXPONENT"):
+            Settings(
+                environment="production",
+                database_url="postgresql+asyncpg://user@db.invalid/agenthub",
+                password_hash_cost_exponent=8,
+                _env_file=None,
+            )
+
     def test_masks_the_password_for_logging(self) -> None:
         settings = Settings(
             environment="production",
@@ -61,3 +80,110 @@ class TestSettings:
         assert "sup3rsecret" not in settings.safe_database_url
         assert settings.safe_database_url.endswith("@db.internal:5432/agenthub")
         assert settings.is_sqlite is False
+
+
+class TestPasswordHashing:
+    def test_the_same_password_hashes_differently_every_time(self) -> None:
+        configure_password_cost(8)
+
+        first, second = (
+            hash_password("a-long-enough-password"),
+            hash_password("a-long-enough-password"),
+        )
+
+        assert first != second  # the salt differs
+        assert verify_password("a-long-enough-password", first)
+        assert verify_password("a-long-enough-password", second)
+
+    def test_the_hash_reveals_nothing_about_the_password(self) -> None:
+        configure_password_cost(8)
+
+        encoded = hash_password("correct-horse-battery-staple")
+
+        assert "correct" not in encoded
+        assert encoded.startswith("scrypt$n=256,r=8,p=1$")
+
+    def test_rejects_a_wrong_password_and_a_damaged_hash(self) -> None:
+        configure_password_cost(8)
+        encoded = hash_password("a-long-enough-password")
+
+        assert verify_password("not-it", encoded) is False
+        assert verify_password("a-long-enough-password", "") is False
+        assert verify_password("a-long-enough-password", "bcrypt$x$y$z") is False
+        assert verify_password("a-long-enough-password", encoded[:-4]) is False
+
+    def test_a_stored_hash_keeps_working_after_the_cost_changes(self) -> None:
+        configure_password_cost(8)
+        encoded = hash_password("a-long-enough-password")
+
+        configure_password_cost(10)
+
+        # Parameters travel with the hash, so old passwords still verify.
+        assert verify_password("a-long-enough-password", encoded)
+        configure_password_cost(8)
+
+
+class TestSessionTokens:
+    def test_tokens_are_unique_and_stored_only_as_fingerprints(self) -> None:
+        first, second = new_session_token(), new_session_token()
+
+        assert first != second
+        assert len(hash_token(first)) == 64
+        assert hash_token(first) == hash_token(first)
+        assert hash_token(first) != hash_token(second)
+        assert first not in hash_token(first)
+
+
+class TestPermissionMatrix:
+    def test_roles_are_ordered(self) -> None:
+        assert has_role("owner", "admin") is True
+        assert has_role("admin", "member") is True
+        assert has_role("member", "admin") is False
+        assert has_role("viewer", "member") is False
+
+    def test_a_viewer_may_only_read(self) -> None:
+        assert can("viewer", "agent:read") is True
+        assert can("viewer", "execution:read") is True
+        assert can("viewer", "member:read") is True
+        assert can("viewer", "agent:create") is False
+        assert can("viewer", "agent:update") is False
+
+    def test_owning_an_agent_lets_a_member_change_it(self) -> None:
+        assert can("member", "agent:update", owns_resource=True) is True
+        assert can("member", "agent:delete", owns_resource=True) is True
+        assert can("member", "agent:execute", owns_resource=True) is True
+        assert can("member", "agent:update", owns_resource=False) is False
+
+    def test_ownership_never_grants_unrelated_actions(self) -> None:
+        assert can("member", "member:manage", owns_resource=True) is False
+        assert can("admin", "organization:manage", owns_resource=True) is False
+        assert can("viewer", "agent:update", owns_resource=True) is False
+
+    def test_require_raises_for_a_refused_action(self) -> None:
+        with pytest.raises(ForbiddenError):
+            require("viewer", "agent:create")
+
+        require("admin", "agent:create")  # does not raise
+
+
+class TestLoginThrottling:
+    def test_allows_the_limit_then_blocks(self) -> None:
+        limiter = SlidingWindowLimiter(limit=3, window_seconds=60)
+
+        for _ in range(3):
+            assert limiter.check("someone@example.com") is True
+            limiter.record("someone@example.com")
+
+        assert limiter.check("someone@example.com") is False
+        assert limiter.retry_after_seconds("someone@example.com") > 0
+        # Another key is unaffected.
+        assert limiter.check("other@example.com") is True
+
+    def test_a_reset_clears_the_key(self) -> None:
+        limiter = SlidingWindowLimiter(limit=1, window_seconds=60)
+        limiter.record("someone@example.com")
+        assert limiter.check("someone@example.com") is False
+
+        limiter.reset("someone@example.com")
+
+        assert limiter.check("someone@example.com") is True

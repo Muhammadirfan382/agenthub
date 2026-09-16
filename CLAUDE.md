@@ -143,6 +143,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m alembic upgrade head       # create/update the schema
 .\.venv\Scripts\python.exe -m scripts.seed_demo          # optional demonstration data
+# Create a real account (prompts for the password; never pass it as an argument):
+.\.venv\Scripts\python.exe -m scripts.create_user --email you@example.com --name "Your Name" --organization "Your Workspace" --role owner
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format --check .

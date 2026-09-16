@@ -5,10 +5,12 @@ import { EmptyState } from '@/components/feedback/EmptyState';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { Alert } from '@/components/ui/Alert';
 import { LinkButton } from '@/components/ui/Button';
 import { toast } from '@/stores/toastStore';
 import type { Agent } from '@/types/domain';
 import { useAgent, useUpdateAgent } from './api';
+import { useAgentPermissions } from './permissions';
 import { AgentForm } from './form/AgentForm';
 import { agentToFormValues, toAgentDraft } from './form/schema';
 
@@ -38,6 +40,7 @@ export default function EditAgentPage() {
 function EditAgent({ agent }: { agent: Agent }) {
   const navigate = useNavigate();
   const update = useUpdateAgent(agent.id);
+  const canUpdate = useAgentPermissions().canUpdate(agent);
 
   return (
     <>
@@ -45,6 +48,12 @@ function EditAgent({ agent }: { agent: Agent }) {
         title={`Edit ${agent.name}`}
         breadcrumbs={[{ label: 'Agents', to: '/agents' }, { label: agent.name, to: `/agents/${agent.id}` }, { label: 'Edit' }]}
       />
+      {!canUpdate && (
+        <Alert tone="warning" title="Your role cannot change this agent" className="mb-6">
+          Only its owner, an administrator or the organization owner can edit it. The API refuses
+          this request regardless of what this page shows.
+        </Alert>
+      )}
       <DataNotice
         resource="agents"
         className="mb-6"
@@ -53,6 +62,7 @@ function EditAgent({ agent }: { agent: Agent }) {
       />
       <AgentForm
         key={agent.id}
+        disabled={!canUpdate}
         defaultValues={agentToFormValues(agent)}
         submitLabel="Save changes"
         cancelTo={`/agents/${agent.id}`}

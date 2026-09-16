@@ -29,6 +29,21 @@ export interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const CSRF_COOKIE = 'agenthub_csrf';
+const CSRF_HEADER = 'X-CSRF-Token';
+
+/**
+ * The session cookie is HttpOnly and unreadable here by design. This second
+ * cookie exists to be read and echoed back in a header: a cross-site page can
+ * make the browser send cookies, but it cannot read them, so it cannot supply
+ * this header. The backend compares it with the token stored on the session.
+ */
+function readCsrfToken(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`));
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
 
 /** The error envelope the backend returns for every failure. */
 const ErrorBodySchema = z.object({ code: z.string().max(64), message: z.string().max(500) });
@@ -56,6 +71,8 @@ async function toApiError(response: Response): Promise<ApiError> {
 }
 
 async function send(path: string, options: RequestOptions, config: AppConfig): Promise<Response> {
+  const method = options.method ?? 'GET';
+  const csrfToken = UNSAFE_METHODS.has(method) ? readCsrfToken() : null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const onExternalAbort = () => controller.abort();
@@ -65,10 +82,11 @@ async function send(path: string, options: RequestOptions, config: AppConfig): P
     let response: Response;
     try {
       response = await fetch(buildUrl(path, config), {
-        method: options.method ?? 'GET',
+        method,
         headers: {
           Accept: 'application/json',
           ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(csrfToken ? { [CSRF_HEADER]: csrfToken } : {}),
         },
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         credentials: 'same-origin',

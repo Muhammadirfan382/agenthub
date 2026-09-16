@@ -32,8 +32,9 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Plain `assert` is the pytest idiom.
-"tests/**" = ["S101"]
+# Plain `assert` is the pytest idiom; S105/S106 flag the throwaway passwords
+# that these tests must contain to exercise authentication at all.
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.12"

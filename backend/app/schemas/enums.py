@@ -38,8 +38,15 @@ ExecutionStatus = Literal[
 ExecutionTrigger = Literal["manual", "schedule", "api"]
 AgentSort = Literal["updated_desc", "name_asc", "risk_desc", "last_execution_desc"]
 
+# Organization roles, least privileged first.
+Role = Literal["viewer", "member", "admin", "owner"]
+UserStatus = Literal["active", "disabled"]
+
 RISK_LEVELS: tuple[RiskLevel, ...] = get_args(RiskLevel)
 CAPABILITY_KEYS: tuple[CapabilityKey, ...] = get_args(CapabilityKey)
 EXECUTION_STATUSES: tuple[ExecutionStatus, ...] = get_args(ExecutionStatus)
 
 RISK_RANK: dict[str, int] = {level: index for index, level in enumerate(RISK_LEVELS)}
+
+ROLES: tuple[Role, ...] = get_args(Role)
+ROLE_RANK: dict[str, int] = {role: index for index, role in enumerate(ROLES)}

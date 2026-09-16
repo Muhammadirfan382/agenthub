@@ -17,12 +17,15 @@ SORT_CLAUSES: dict[AgentSort, UnaryExpression[Any]] = {
 
 
 def _filtered(
+    organization_id: str,
     search: str | None,
     status: str | None,
     risk: str | None,
     category: str | None,
 ) -> Select[tuple[Agent]]:
-    statement = select(Agent)
+    # The organization filter is applied first and always: there is no query
+    # in this module that can reach another organization's rows.
+    statement = select(Agent).where(Agent.organization_id == organization_id)
     if search:
         pattern = "%" + search.strip().lower() + "%"
         statement = statement.where(
@@ -44,6 +47,7 @@ def _filtered(
 async def list_agents(
     session: AsyncSession,
     *,
+    organization_id: str,
     search: str | None = None,
     status: str | None = None,
     risk: str | None = None,
@@ -52,19 +56,23 @@ async def list_agents(
     limit: int,
     offset: int,
 ) -> tuple[list[Agent], int]:
-    statement = _filtered(search, status, risk, category)
+    statement = _filtered(organization_id, search, status, risk, category)
     total = await session.scalar(select(func.count()).select_from(statement.subquery()))
     rows = await session.scalars(statement.order_by(SORT_CLAUSES[sort]).limit(limit).offset(offset))
     return list(rows), int(total or 0)
 
 
-async def get_agent(session: AsyncSession, agent_id: str) -> Agent | None:
-    agent: Agent | None = await session.get(Agent, agent_id)
+async def get_agent(session: AsyncSession, agent_id: str, organization_id: str) -> Agent | None:
+    agent: Agent | None = await session.scalar(
+        select(Agent).where(Agent.id == agent_id, Agent.organization_id == organization_id)
+    )
     return agent
 
 
-async def get_agent_by_name(session: AsyncSession, name: str) -> Agent | None:
+async def get_agent_by_name(session: AsyncSession, name: str, organization_id: str) -> Agent | None:
     agent: Agent | None = await session.scalar(
-        select(Agent).where(func.lower(Agent.name) == name.lower())
+        select(Agent).where(
+            Agent.organization_id == organization_id, func.lower(Agent.name) == name.lower()
+        )
     )
     return agent

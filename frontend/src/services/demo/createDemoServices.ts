@@ -5,6 +5,8 @@ import {
   demoExecutions,
   demoExecutionsPerDay,
   demoMarketplaceListings,
+  demoMembers,
+  demoOrganization,
   demoPolicies,
   demoSecurityEvents,
   demoTokensPerDay,
@@ -17,6 +19,7 @@ import type {
   AuthService,
   ExecutionService,
   MarketplaceService,
+  MemberService,
   SecurityService,
   Services,
   SystemService,
@@ -27,9 +30,12 @@ import type {
   CapabilityKey,
   Execution,
   ExecutionStatus,
+  Member,
   PermissionOverviewRow,
   RiskLevel,
+  Role,
   SecurityCheckStatus,
+  SessionInfo,
 } from '@/types/domain';
 import { EXECUTION_STATUSES } from '@/types/domain';
 
@@ -287,13 +293,75 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     },
   };
 
+  // Demo "authentication": there is nothing to authenticate against. Any
+  // password is accepted, the session is local, and the login screen says so.
+  let signedIn = true;
+  const members: Member[] = structuredClone(demoMembers);
+
+  const demoSession = (): SessionInfo => ({
+    user,
+    organization: demoOrganization,
+    role: 'owner',
+    memberships: [{ organization: demoOrganization, role: 'owner' }],
+    expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+  });
+
   const authService: AuthService = {
-    currentUser() {
-      return respond(user);
+    session() {
+      return respond(signedIn ? demoSession() : null);
+    },
+    login() {
+      signedIn = true;
+      return respond(demoSession());
+    },
+    logout() {
+      signedIn = false;
+      return respond(undefined);
     },
     updateProfile(update) {
       user = { ...user, ...update };
       return respond(user);
+    },
+    changePassword() {
+      return respond(undefined);
+    },
+    switchOrganization() {
+      return respond(demoSession());
+    },
+  };
+
+  const memberService: MemberService = {
+    list() {
+      return respond(members);
+    },
+    add(email: string, role: Role) {
+      if (members.some((member) => member.email.toLowerCase() === email.toLowerCase())) {
+        return fail('This person is already a member.');
+      }
+      const member: Member = {
+        id: `mem_demo_${members.length + 1}`,
+        userId: `usr_demo_${members.length + 1}`,
+        email,
+        name: email.split('@')[0] ?? email,
+        role,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        lastLoginAt: null,
+      };
+      members.push(member);
+      return respond(member);
+    },
+    setRole(id: string, role: Role) {
+      const member = members.find((candidate) => candidate.id === id);
+      if (!member) return fail('This member no longer exists.');
+      member.role = role;
+      return respond(member);
+    },
+    remove(id: string) {
+      const index = members.findIndex((candidate) => candidate.id === id);
+      if (index === -1) return fail('This member no longer exists.');
+      members.splice(index, 1);
+      return respond(undefined);
     },
   };
 
@@ -307,5 +375,6 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     system: systemService,
     analytics: analyticsService,
     auth: authService,
+    members: memberService,
   };
 }

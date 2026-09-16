@@ -20,6 +20,7 @@ import { AgentExecutionsTab } from './detail/AgentExecutionsTab';
 import { AgentOverviewTab } from './detail/AgentOverviewTab';
 import { AgentSecurityTab } from './detail/AgentSecurityTab';
 import { AgentVersionsTab } from './detail/AgentVersionsTab';
+import { useAgentPermissions } from './permissions';
 import { useAgentActions } from './useAgentActions';
 
 const TABS = [
@@ -63,6 +64,7 @@ function AgentDetail({ agent }: { agent: Agent }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [deployOpen, setDeployOpen] = useState(false);
   const actions = useAgentActions({ onDeleted: () => navigate('/agents') });
+  const permissions = useAgentPermissions();
 
   const requestedTab = searchParams.get('tab');
   const tab: TabId = TABS.some((t) => t.id === requestedTab) ? (requestedTab as TabId) : 'overview';
@@ -90,27 +92,35 @@ function AgentDetail({ agent }: { agent: Agent }) {
         }
         actions={
           <>
-            <Button variant="primary" onClick={() => actions.requestExecute(agent)} disabled={agent.status !== 'active'}>
-              <Play aria-hidden="true" className="size-4" />
-              Execute
-            </Button>
-            <LinkButton to={`/agents/${agent.id}/edit`} variant="secondary">
-              <Pencil aria-hidden="true" className="size-4" />
-              Edit
-            </LinkButton>
-            <Button variant="secondary" onClick={() => setDeployOpen(true)} disabled={agent.status === 'disabled'}>
-              <Rocket aria-hidden="true" className="size-4" />
-              Deploy
-            </Button>
-            <Button variant="secondary" onClick={() => actions.toggleDisabled(agent)} loading={actions.statusPending}>
-              {!actions.statusPending && <Power aria-hidden="true" className="size-4" />}
-              {agent.status === 'disabled' ? 'Enable' : 'Disable'}
-            </Button>
-            <DropdownMenu
-              label={`More actions for ${agent.name}`}
-              trigger={<Ellipsis aria-hidden="true" className="size-4" />}
-              items={[{ id: 'delete', label: 'Delete agent', icon: Trash2, tone: 'danger', onSelect: () => actions.requestDelete(agent) }]}
-            />
+            {permissions.canExecute(agent) && (
+              <Button variant="primary" onClick={() => actions.requestExecute(agent)} disabled={agent.status !== 'active'}>
+                <Play aria-hidden="true" className="size-4" />
+                Execute
+              </Button>
+            )}
+            {permissions.canUpdate(agent) && (
+              <>
+                <LinkButton to={`/agents/${agent.id}/edit`} variant="secondary">
+                  <Pencil aria-hidden="true" className="size-4" />
+                  Edit
+                </LinkButton>
+                <Button variant="secondary" onClick={() => setDeployOpen(true)} disabled={agent.status === 'disabled'}>
+                  <Rocket aria-hidden="true" className="size-4" />
+                  Deploy
+                </Button>
+                <Button variant="secondary" onClick={() => actions.toggleDisabled(agent)} loading={actions.statusPending}>
+                  {!actions.statusPending && <Power aria-hidden="true" className="size-4" />}
+                  {agent.status === 'disabled' ? 'Enable' : 'Disable'}
+                </Button>
+              </>
+            )}
+            {permissions.canDelete(agent) && (
+              <DropdownMenu
+                label={`More actions for ${agent.name}`}
+                trigger={<Ellipsis aria-hidden="true" className="size-4" />}
+                items={[{ id: 'delete', label: 'Delete agent', icon: Trash2, tone: 'danger', onSelect: () => actions.requestDelete(agent) }]}
+              />
+            )}
           </>
         }
       />

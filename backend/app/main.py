@@ -16,7 +16,9 @@ from app.core.config import API_V1_PREFIX, SERVICE_VERSION, Settings, get_settin
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.core.security import configure_password_cost
 from app.db.session import create_engine, create_session_factory
+from app.services.login_guard import LoginGuard
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ def create_app(
     """Build the application. Tests pass explicit settings and a session factory."""
     resolved = settings if settings is not None else get_settings()
     configure_logging()
+    configure_password_cost(resolved.password_hash_cost_exponent)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -57,6 +60,12 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.settings = resolved
+    # Per-process sign-in throttling; see app/services/login_guard.py.
+    app.state.login_guard = LoginGuard(resolved)
+    if session_factory is not None:
+        # Injected by tests: usable without running the lifespan.
+        app.state.engine = None
+        app.state.session_factory = session_factory
     # Outermost middleware runs first on the way in and last on the way out.
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)

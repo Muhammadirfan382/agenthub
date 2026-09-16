@@ -139,5 +139,8 @@ jobs:
           python -m alembic downgrade base
           python -m alembic upgrade head
 
+      # Output is discarded: the seed prints generated demo passwords, and CI
+      # logs are not a place for credentials even throwaway ones. A failure
+      # still fails the job through the exit code.
       - name: Seed demonstration data
-        run: python -m scripts.seed_demo
+        run: python -m scripts.seed_demo > /dev/null

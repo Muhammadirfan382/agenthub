@@ -11,6 +11,7 @@ import type {
   ExecutionStatus,
   ID,
   MarketplaceListing,
+  Member,
   ModelConfig,
   PlatformPolicy,
   ResourceLimits,
@@ -18,9 +19,11 @@ import type {
   SecurityEvent,
   SecurityOverview,
   SecurityPolicy,
+  SessionInfo,
   SystemComponentStatus,
   UserProfile,
 } from '@/types/domain';
+import type { Role } from '@/types/domain';
 
 /**
  * Service contracts. UI code depends only on these interfaces.
@@ -109,23 +112,45 @@ export interface AnalyticsService {
 
 export interface ProfileUpdate {
   name: string;
-  email: string;
   timezone: string;
 }
 
+export interface Credentials {
+  email: string;
+  password: string;
+}
+
+export interface PasswordChange {
+  currentPassword: string;
+  newPassword: string;
+}
+
 /**
- * Placeholder. There is no authentication in Phase 1. The "current user" is a
- * demo profile, and nothing here is a security control.
+ * Sessions. The backend owns them: the browser only holds an HttpOnly cookie
+ * it cannot read, and every answer here comes from the server.
  */
 export interface AuthService {
-  currentUser(): Promise<UserProfile>;
+  /** The current session, or null when nobody is signed in. */
+  session(): Promise<SessionInfo | null>;
+  login(credentials: Credentials): Promise<SessionInfo>;
+  logout(): Promise<void>;
   updateProfile(update: ProfileUpdate): Promise<UserProfile>;
+  changePassword(change: PasswordChange): Promise<void>;
+  switchOrganization(organizationId: ID): Promise<SessionInfo>;
+}
+
+export interface MemberService {
+  list(): Promise<Member[]>;
+  /** Adds an existing account to the organization; accounts are created out of band. */
+  add(email: string, role: Role): Promise<Member>;
+  setRole(id: ID, role: Role): Promise<Member>;
+  remove(id: ID): Promise<void>;
 }
 
 export type DataSource = 'demo' | 'api';
 
 /** Parts of the app the real backend can serve today. Everything else is demo data. */
-export type LiveResource = 'agents' | 'executions' | 'dashboard';
+export type LiveResource = 'agents' | 'executions' | 'dashboard' | 'members';
 
 export interface Services {
   dataSource: DataSource;
@@ -138,4 +163,5 @@ export interface Services {
   system: SystemService;
   analytics: AnalyticsService;
   auth: AuthService;
+  members: MemberService;
 }

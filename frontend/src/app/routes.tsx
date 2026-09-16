@@ -1,6 +1,7 @@
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 import { AppShell } from '@/components/layout/AppShell';
+import { RequireAuth } from '@/features/auth/RequireAuth';
 import NotFoundPage from '@/features/errors/NotFoundPage';
 import RouteErrorPage from '@/features/errors/RouteErrorPage';
 
@@ -16,11 +17,22 @@ const ExecutionDetailPage = lazy(() => import('@/features/executions/ExecutionDe
 const SecurityPage = lazy(() => import('@/features/security/SecurityPage'));
 const AnalyticsPage = lazy(() => import('@/features/analytics/AnalyticsPage'));
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'));
+const LoginPage = lazy(() => import('@/features/auth/LoginPage'));
 
 export const routes: RouteObject[] = [
   {
+    // Outside the shell: the only route reachable without a session.
+    path: '/login',
+    element: <LoginPage />,
+    errorElement: <RouteErrorPage />,
+  },
+  {
     path: '/',
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     // Last-resort boundary if the shell itself fails.
     errorElement: <RouteErrorPage />,
     children: [

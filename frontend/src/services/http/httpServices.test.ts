@@ -180,7 +180,7 @@ describe('api mode services', () => {
     const services = createHttpServices();
 
     expect(services.dataSource).toBe('api');
-    expect(services.liveResources).toEqual(['agents', 'executions', 'dashboard']);
+    expect(services.liveResources).toEqual(['agents', 'executions', 'dashboard', 'members']);
   });
 
   it('counts the dashboard from live agents and executions', async () => {

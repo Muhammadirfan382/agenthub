@@ -299,8 +299,52 @@ export interface UserProfile {
   id: ID;
   name: string;
   email: string;
-  role: string;
+  status: 'active' | 'disabled';
   timezone: string;
+  createdAt: ISODate;
+  lastLoginAt: ISODate | null;
+}
+
+/** Roles inside one organization, least privileged first. */
+export type Role = 'viewer' | 'member' | 'admin' | 'owner';
+export const ROLES: readonly Role[] = ['viewer', 'member', 'admin', 'owner'];
+
+export const ROLE_LABELS: Record<Role, string> = {
+  viewer: 'Viewer',
+  member: 'Member',
+  admin: 'Administrator',
+  owner: 'Owner',
+};
+
+export interface Organization {
+  id: ID;
+  name: string;
+  slug: string;
+}
+
+export interface OrganizationMembership {
+  organization: Organization;
+  role: Role;
+}
+
+/** Who the caller is and what they may do, as the backend sees it. */
+export interface SessionInfo {
+  user: UserProfile;
+  organization: Organization;
+  role: Role;
+  memberships: OrganizationMembership[];
+  expiresAt: ISODate;
+}
+
+export interface Member {
+  id: ID;
+  userId: ID;
+  email: string;
+  name: string;
+  role: Role;
+  status: 'active' | 'disabled';
+  createdAt: ISODate;
+  lastLoginAt: ISODate | null;
 }
 
 export interface BackendHealth {

@@ -20,6 +20,9 @@ class Execution(Base):
     __tablename__ = "executions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     agent_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
     )

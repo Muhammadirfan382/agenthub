@@ -139,6 +139,27 @@ authorization control.
   A 404 on a detail request becomes `null`; other failures raise `ApiError`
   carrying the backend's own `code` and `message`.
 
+### Sessions and roles (Phase 3)
+
+`AuthService` owns identity: `session()`, `login()`, `logout()`, `changePassword()`,
+`updateProfile()` and `switchOrganization()`. The session is the app's only source
+of truth about who is signed in, and it always comes from the server — the
+browser holds an HttpOnly cookie it cannot read.
+
+- **Route guard:** every route inside the shell is wrapped in `RequireAuth`, which
+  shows the sign-in page when `session()` answers null. `/login` is the only route
+  outside it.
+- **A 401 anywhere signs the app out:** the query client watches every query and
+  mutation, and drops the cached session when the API returns 401, so an expired
+  session ends at the sign-in page rather than in a retry loop.
+- **CSRF:** `services/http/client.ts` reads the readable `agenthub_csrf` cookie and
+  echoes it in `X-CSRF-Token` on every unsafe request.
+- **Role-aware UI:** `services/permissions.ts` mirrors the backend matrix, and
+  `usePermission()` / `useAgentPermissions()` hide controls a role cannot use.
+  This is presentation only — see §9.
+- **Demo mode** keeps working without a backend: its `login()` accepts anything and
+  the sign-in page says so in as many words.
+
 ### Data source
 
 `createServices(dataSource)` returns either the demo services or
@@ -147,8 +168,8 @@ user can switch it in **Settings → API**; the choice is persisted per browser 
 `stores/dataSourceStore.ts`. Switching rebuilds the services **and** the query
 cache, so demo rows can never be displayed as backend data.
 
-In API mode the backend serves agents, executions and the dashboard counts derived
-from them. Marketplace, security, analytics and the profile still come from demo
+In API mode the backend serves identity (sessions, members), agents, executions
+and the dashboard counts derived from them. Marketplace, security, analytics and the profile still come from demo
 data. `services.liveResources` states exactly which resources are real, and
 `useIsLive(resource)` drives the `DataNotice` on each page, so no page can keep
 claiming "demonstration data" while reading from the backend.

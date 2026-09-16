@@ -10,7 +10,7 @@ designed in detail when it begins.
 | 0 | Initialization | ✅ Complete |
 | 1 | Frontend | ✅ Complete (demonstration data; no backend integration) |
 | 2 | Backend | ✅ Complete (agents and executions persisted; no auth) |
-| 3 | Authentication / RBAC | ⏳ Not started |
+| 3 | Authentication / RBAC | ✅ Complete (password sign-in, sessions, roles) |
 | 4 | Agent registry | ⏳ Not started |
 | 5 | Agent runtime | ⏳ Not started |
 | 6 | Docker sandbox | ⏳ Not started |
@@ -71,6 +71,18 @@ agent.
 - Organizations, memberships and roles.
 - Server-side authorization on every endpoint; CSRF protection; authentication rate
   limiting; negative tests for access control.
+
+**Delivered:** accounts created out of band (`scripts/create_user.py`; no public
+sign-up), scrypt password hashing, opaque server-side sessions in HttpOnly
+cookies with absolute and idle expiry, CSRF tokens on every unsafe request,
+per-account and per-address sign-in throttling, organizations with memberships
+and four roles, authorization checked on every endpoint, organization scoping in
+every query, and a frontend with a sign-in page, route guard, role-aware controls
+and a members screen. See [BACKEND.md](BACKEND.md) §4.
+
+**Strategy chosen:** passwords plus server-side sessions. MFA and SSO are
+deliberately deferred — both need email or an identity provider, neither of which
+exists yet — and so are password reset and email verification.
 
 ## Phase 4: Agent registry
 

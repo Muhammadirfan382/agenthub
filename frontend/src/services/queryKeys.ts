@@ -31,6 +31,10 @@ export const queryKeys = {
     summary: ['analytics', 'summary'] as const,
   },
   auth: {
-    currentUser: ['auth', 'current-user'] as const,
+    session: ['auth', 'session'] as const,
+  },
+  members: {
+    all: ['members'] as const,
+    list: ['members', 'list'] as const,
   },
 };

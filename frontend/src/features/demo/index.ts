@@ -8,6 +8,6 @@
 export { demoAgents } from './agents';
 export { buildDemoExecutionDetail, demoExecutions } from './executions';
 export { demoMarketplaceListings } from './marketplace';
-export { demoPeople, demoUser } from './people';
+export { demoMembers, demoOrganization, demoPeople, demoUser } from './people';
 export { demoComponentStatus, demoExecutionsPerDay, demoTokensPerDay } from './platform';
 export { demoPolicies, demoSecurityEvents } from './security';

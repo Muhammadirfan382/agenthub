@@ -48,5 +48,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
     testTimeout: 20000,
+    // Each file gets its own jsdom; spawning one per core made slow machines
+    // flake on timing rather than on behaviour.
+    maxWorkers: 4,
   },
 });

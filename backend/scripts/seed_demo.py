@@ -1,14 +1,19 @@
-"""Insert demonstration agents and executions.
+"""Insert a demonstration organization, accounts, agents and executions.
 
     .venv/Scripts/python.exe -m scripts.seed_demo
 
 Everything written here is fictional and exists so the API and UI have
 something to show. Execution rows are records only: no agent has run, because
-the runtime does not exist yet. Existing rows with the same name are skipped,
-so the script is safe to run twice.
+the runtime does not exist yet. Existing rows are skipped, so the script is
+safe to run twice.
+
+The demo accounts get randomly generated passwords, printed once when they are
+created. They are for local development only: never seed them into an
+environment that anyone else can reach.
 """
 
 import asyncio
+import secrets
 from datetime import timedelta
 from typing import Any
 
@@ -16,17 +21,26 @@ from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.core.time import now_utc
-from app.db.models import Agent, Execution
+from app.db.models import Agent, Execution, User
 from app.db.session import create_engine, create_session_factory
-from app.schemas.enums import CAPABILITY_KEYS
+from app.repositories import identity_repository
+from app.schemas.enums import CAPABILITY_KEYS, Role
+from app.services import auth_service
 from app.services.agent_service import (
     INITIAL_SECURITY_CHECKS,
-    PLACEHOLDER_USER_ID,
-    PLACEHOLDER_USER_NAME,
     new_agent_id,
     new_execution_id,
 )
 from app.services.risk import derive_risk, permission_risk
+
+ORGANIZATION_NAME = "Demo Workspace"
+
+# Addresses in example.com are reserved for documentation and cannot receive mail.
+DEMO_ACCOUNTS: list[tuple[str, str, Role]] = [
+    ("owner@example.com", "Demo Owner", "owner"),
+    ("member@example.com", "Demo Member", "member"),
+    ("viewer@example.com", "Demo Viewer", "viewer"),
+]
 
 NOW = now_utc()
 
@@ -256,11 +270,46 @@ async def seed() -> None:
     created_agents = 0
     created_executions = 0
 
+    created_accounts: list[tuple[str, str]] = []
+
     try:
         async with factory() as session:
+            organization = await identity_repository.get_organization_by_slug(
+                session, auth_service.slugify(ORGANIZATION_NAME)
+            )
+            if organization is None:
+                organization = await auth_service.create_organization(
+                    session, name=ORGANIZATION_NAME
+                )
+
+            owner: User | None = None
+            for email, name, role in DEMO_ACCOUNTS:
+                user = await identity_repository.get_user_by_email(session, email)
+                if user is None:
+                    # Printed once, below. Nothing is stored in this file.
+                    password = secrets.token_urlsafe(16)
+                    user = await auth_service.create_user(
+                        session, email=email, name=name, password=password
+                    )
+                    created_accounts.append((email, password))
+                if (
+                    await identity_repository.get_membership(session, user.id, organization.id)
+                    is None
+                ):
+                    await auth_service.add_member(
+                        session, organization=organization, user=user, role=role
+                    )
+                if role == "owner":
+                    owner = user
+            assert owner is not None  # noqa: S101 - the owner is always in DEMO_ACCOUNTS
+
             by_name: dict[str, Agent] = {}
             for spec in DEMO_AGENTS:
-                existing = await session.scalar(select(Agent).where(Agent.name == spec["name"]))
+                existing = await session.scalar(
+                    select(Agent).where(
+                        Agent.organization_id == organization.id, Agent.name == spec["name"]
+                    )
+                )
                 if existing is not None:
                     by_name[spec["name"]] = existing
                     continue
@@ -268,6 +317,7 @@ async def seed() -> None:
                 level, score = derive_risk(spec["permissions"])
                 agent = Agent(
                     id=new_agent_id(spec["name"]),
+                    organization_id=organization.id,
                     name=spec["name"],
                     description=spec["description"],
                     category=spec["category"],
@@ -277,10 +327,10 @@ async def seed() -> None:
                     verification=spec["verification"],
                     risk_level=level,
                     risk_score=score,
-                    creator_id=PLACEHOLDER_USER_ID,
-                    creator_name=PLACEHOLDER_USER_NAME,
-                    owner_id=PLACEHOLDER_USER_ID,
-                    owner_name=PLACEHOLDER_USER_NAME,
+                    creator_id=owner.id,
+                    creator_name=owner.name,
+                    owner_id=owner.id,
+                    owner_name=owner.name,
                     created_at=NOW - timedelta(days=30),
                     updated_at=NOW - timedelta(days=2),
                     last_execution_at=None,
@@ -316,6 +366,7 @@ async def seed() -> None:
                 session.add(
                     Execution(
                         id=new_execution_id(),
+                        organization_id=organization.id,
                         agent_id=agent.id,
                         agent_name=agent.name,
                         status=spec["status"],
@@ -339,6 +390,12 @@ async def seed() -> None:
 
     print(f"Seed complete: {created_agents} agents and {created_executions} executions added.")
     print(f"Database: {settings.safe_database_url}")
+    if created_accounts:
+        print()
+        print("Demonstration accounts (development only; shown once):")
+        for email, password in created_accounts:
+            print(f"  {email}  {password}")
+        print("Change or delete them before exposing this instance to anyone else.")
 
 
 if __name__ == "__main__":

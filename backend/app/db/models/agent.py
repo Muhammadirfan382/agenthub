@@ -9,7 +9,16 @@ API filters or sorts on are real columns with indexes.
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,10 +35,15 @@ class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (
         CheckConstraint("risk_score >= 0 AND risk_score <= 100", name="risk_score_range"),
+        # Names are unique inside an organization, not across the platform.
+        UniqueConstraint("organization_id", "name", name="uq_agents_organization_id_name"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     tags: Mapped[list[str]] = mapped_column(JsonDocument, nullable=False, default=list)

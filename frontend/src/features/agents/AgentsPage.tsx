@@ -12,6 +12,7 @@ import { useAgents } from './api';
 import { AgentCard } from './components/AgentCard';
 import { AgentFilters, type AgentView } from './components/AgentFilters';
 import { AgentTable } from './components/AgentTable';
+import { useAgentPermissions } from './permissions';
 import { useAgentActions } from './useAgentActions';
 
 const DEFAULTS: Required<AgentListParams> = { search: '', status: 'all', risk: 'all', category: 'all', sort: 'updated_desc' };
@@ -32,6 +33,7 @@ export default function AgentsPage() {
   const params = readParams(searchParams);
   const query = useAgents(params);
   const actions = useAgentActions();
+  const { canCreate } = useAgentPermissions();
 
   const update = (patch: Partial<AgentListParams>) => {
     const next = { ...params, ...patch };
@@ -51,10 +53,12 @@ export default function AgentsPage() {
         title="Agents"
         description="Manage the agents in your workspace: their status, versions, verification and risk."
         actions={
-          <LinkButton to="/agents/create" variant="primary">
-            <Plus aria-hidden="true" className="size-4" />
-            Create agent
-          </LinkButton>
+          canCreate ? (
+            <LinkButton to="/agents/create" variant="primary">
+              <Plus aria-hidden="true" className="size-4" />
+              Create agent
+            </LinkButton>
+          ) : null
         }
       />
 
@@ -89,11 +93,17 @@ export default function AgentsPage() {
               <EmptyState
                 icon={Bot}
                 title="No agents yet"
-                description="Create your first agent to start managing it here."
+                description={
+                  canCreate
+                    ? 'Create your first agent to start managing it here.'
+                    : 'Nobody has created an agent in this organization yet.'
+                }
                 action={
-                  <LinkButton to="/agents/create" variant="primary" size="sm">
-                    Create agent
-                  </LinkButton>
+                  canCreate ? (
+                    <LinkButton to="/agents/create" variant="primary" size="sm">
+                      Create agent
+                    </LinkButton>
+                  ) : undefined
                 }
               />
             )

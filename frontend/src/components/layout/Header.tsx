@@ -2,6 +2,7 @@ import { Menu, Plus } from 'lucide-react';
 import { LinkButton } from '@/components/ui/Button';
 import { buttonClasses } from '@/components/ui/buttonStyles';
 import { useUiStore } from '@/stores/uiStore';
+import { useAgentPermissions } from '@/features/agents/permissions';
 import { DataSourceBadge } from './DataSourceBadge';
 import { LogoMark } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
@@ -10,6 +11,7 @@ import { UserMenu } from './UserMenu';
 export function Header() {
   const mobileNavOpen = useUiStore((state) => state.mobileNavOpen);
   const setMobileNavOpen = useUiStore((state) => state.setMobileNavOpen);
+  const { canCreate } = useAgentPermissions();
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-surface/90 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/75 sm:px-6">
@@ -31,10 +33,12 @@ export function Header() {
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <LinkButton to="/agents/create" variant="primary" size="sm" className="hidden sm:inline-flex">
-          <Plus aria-hidden="true" className="size-4" />
-          Create agent
-        </LinkButton>
+        {canCreate && (
+          <LinkButton to="/agents/create" variant="primary" size="sm" className="hidden sm:inline-flex">
+            <Plus aria-hidden="true" className="size-4" />
+            Create agent
+          </LinkButton>
+        )}
         <ThemeToggle />
         <UserMenu />
       </div>

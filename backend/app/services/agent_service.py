@@ -1,7 +1,9 @@
-"""Agent rules.
+"""Agent rules and the authorization that goes with them.
 
-Ownership is a placeholder until authentication exists (Phase 3): every agent
-is attributed to the same demo user. Nothing here is an authorization check.
+Every function takes the caller's `AuthContext`: agents are read and written
+only inside the caller's organization, and each action is checked against the
+permission matrix in `authorization.py` before anything happens. A member may
+act on an agent they own; changing anyone else's agent needs admin or owner.
 """
 
 import re
@@ -16,10 +18,9 @@ from app.db.models import Agent, Execution
 from app.repositories import agent_repository
 from app.schemas.agent import AgentDraft
 from app.schemas.enums import AgentStatus, ExecutionTrigger
+from app.services import authorization
+from app.services.auth_service import AuthContext
 from app.services.risk import derive_risk
-
-PLACEHOLDER_USER_ID = "usr_demo_current"
-PLACEHOLDER_USER_NAME = "Demo User"
 
 INITIAL_SECURITY_CHECKS: list[dict[str, Any]] = [
     {
@@ -78,8 +79,10 @@ def _draft_documents(draft: AgentDraft) -> dict[str, Any]:
     }
 
 
-async def create_agent(session: AsyncSession, draft: AgentDraft) -> Agent:
-    if await agent_repository.get_agent_by_name(session, draft.name):
+async def create_agent(session: AsyncSession, draft: AgentDraft, *, context: AuthContext) -> Agent:
+    authorization.require(context.role, "agent:create")
+
+    if await agent_repository.get_agent_by_name(session, draft.name, context.organization_id):
         raise ConflictError("An agent with this name already exists.")
 
     documents = _draft_documents(draft)
@@ -88,6 +91,7 @@ async def create_agent(session: AsyncSession, draft: AgentDraft) -> Agent:
 
     agent = Agent(
         id=new_agent_id(draft.name),
+        organization_id=context.organization_id,
         name=draft.name,
         description=draft.description,
         category=draft.category,
@@ -99,10 +103,10 @@ async def create_agent(session: AsyncSession, draft: AgentDraft) -> Agent:
         verification="unverified",
         risk_level=level,
         risk_score=score,
-        creator_id=PLACEHOLDER_USER_ID,
-        creator_name=PLACEHOLDER_USER_NAME,
-        owner_id=PLACEHOLDER_USER_ID,
-        owner_name=PLACEHOLDER_USER_NAME,
+        creator_id=context.user_id,
+        creator_name=context.user.name,
+        owner_id=context.user_id,
+        owner_name=context.user.name,
         created_at=now,
         updated_at=now,
         last_execution_at=None,
@@ -122,17 +126,29 @@ async def create_agent(session: AsyncSession, draft: AgentDraft) -> Agent:
     return agent
 
 
-async def get_agent(session: AsyncSession, agent_id: str) -> Agent:
-    agent = await agent_repository.get_agent(session, agent_id)
+async def get_agent(session: AsyncSession, agent_id: str, *, context: AuthContext) -> Agent:
+    """Reads are organization-scoped: another organization's id is a 404."""
+    authorization.require(context.role, "agent:read")
+    agent = await agent_repository.get_agent(session, agent_id, context.organization_id)
     if agent is None:
         raise NotFoundError("No agent with this id.")
     return agent
 
 
-async def update_agent(session: AsyncSession, agent_id: str, draft: AgentDraft) -> Agent:
-    agent = await get_agent(session, agent_id)
+async def _agent_for_change(
+    session: AsyncSession, agent_id: str, *, context: AuthContext, action: authorization.Action
+) -> Agent:
+    agent = await get_agent(session, agent_id, context=context)
+    authorization.require(context.role, action, owns_resource=agent.owner_id == context.user_id)
+    return agent
 
-    clash = await agent_repository.get_agent_by_name(session, draft.name)
+
+async def update_agent(
+    session: AsyncSession, agent_id: str, draft: AgentDraft, *, context: AuthContext
+) -> Agent:
+    agent = await _agent_for_change(session, agent_id, context=context, action="agent:update")
+
+    clash = await agent_repository.get_agent_by_name(session, draft.name, context.organization_id)
     if clash is not None and clash.id != agent.id:
         raise ConflictError("An agent with this name already exists.")
 
@@ -170,13 +186,15 @@ async def update_agent(session: AsyncSession, agent_id: str, draft: AgentDraft) 
     return agent
 
 
-async def delete_agent(session: AsyncSession, agent_id: str) -> None:
-    agent = await get_agent(session, agent_id)
+async def delete_agent(session: AsyncSession, agent_id: str, *, context: AuthContext) -> None:
+    agent = await _agent_for_change(session, agent_id, context=context, action="agent:delete")
     await session.delete(agent)
 
 
-async def set_status(session: AsyncSession, agent_id: str, status: AgentStatus) -> Agent:
-    agent = await get_agent(session, agent_id)
+async def set_status(
+    session: AsyncSession, agent_id: str, status: AgentStatus, *, context: AuthContext
+) -> Agent:
+    agent = await _agent_for_change(session, agent_id, context=context, action="agent:update")
 
     if status == "active":
         if agent.verification == "rejected":
@@ -194,10 +212,14 @@ async def set_status(session: AsyncSession, agent_id: str, status: AgentStatus) 
 
 
 async def request_execution(
-    session: AsyncSession, agent_id: str, trigger: ExecutionTrigger = "manual"
+    session: AsyncSession,
+    agent_id: str,
+    trigger: ExecutionTrigger = "manual",
+    *,
+    context: AuthContext,
 ) -> Execution:
     """Records an execution request. Nothing runs: there is no runtime yet."""
-    agent = await get_agent(session, agent_id)
+    agent = await _agent_for_change(session, agent_id, context=context, action="agent:execute")
     if agent.status != "active":
         raise UnprocessableError(
             "Only active agents can be executed. This agent is " + agent.status + "."
@@ -206,6 +228,7 @@ async def request_execution(
     now = now_utc()
     execution = Execution(
         id=new_execution_id(),
+        organization_id=agent.organization_id,
         agent_id=agent.id,
         agent_name=agent.name,
         status="QUEUED",

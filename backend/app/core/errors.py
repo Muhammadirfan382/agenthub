@@ -38,6 +38,33 @@ class ApiError(Exception):
         self.message = message
 
 
+class UnauthorizedError(ApiError):
+    """No usable session. The client should authenticate and retry."""
+
+    def __init__(self, message: str = "Authentication is required.") -> None:
+        super().__init__(status.HTTP_401_UNAUTHORIZED, "unauthenticated", message)
+
+
+class CsrfError(ApiError):
+    """A state-changing request arrived without a matching CSRF token."""
+
+    def __init__(self, message: str = "Missing or invalid CSRF token.") -> None:
+        super().__init__(status.HTTP_403_FORBIDDEN, "csrf_failed", message)
+
+
+class ForbiddenError(ApiError):
+    """Authenticated, but not allowed to do this."""
+
+    def __init__(self, message: str = "You do not have permission to do this.") -> None:
+        super().__init__(status.HTTP_403_FORBIDDEN, "forbidden", message)
+
+
+class RateLimitedError(ApiError):
+    def __init__(self, message: str, retry_after_seconds: int) -> None:
+        super().__init__(status.HTTP_429_TOO_MANY_REQUESTS, "rate_limited", message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class NotFoundError(ApiError):
     def __init__(self, message: str) -> None:
         super().__init__(status.HTTP_404_NOT_FOUND, "not_found", message)
@@ -65,11 +92,16 @@ def _field_path(loc: Any) -> str:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
-        return _json(exc.status_code, ErrorResponse(code=exc.code, message=exc.message))
+        response = _json(exc.status_code, ErrorResponse(code=exc.code, message=exc.message))
+        if isinstance(exc, RateLimitedError):
+            response.headers["Retry-After"] = str(exc.retry_after_seconds)
+        return response
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         codes = {
+            status.HTTP_401_UNAUTHORIZED: "unauthenticated",
+            status.HTTP_403_FORBIDDEN: "forbidden",
             status.HTTP_404_NOT_FOUND: "not_found",
             status.HTTP_405_METHOD_NOT_ALLOWED: "method_not_allowed",
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: "payload_too_large",

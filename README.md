@@ -26,9 +26,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 0 | Project initialization | ✅ Complete |
 | 1 | Frontend and UI (demonstration data) | ✅ Complete |
 | 2 | Backend: API, PostgreSQL, migrations | ✅ Complete |
-| 3–10 | Auth, registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
+| 3 | Authentication and RBAC | ✅ Complete |
+| 4–10 | Registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–2):**
+**What exists today (Phases 0–3):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -40,22 +41,24 @@ aims to make that safe to do inside an organization by combining two things:
 - A FastAPI backend ([docs/BACKEND.md](docs/BACKEND.md)) that persists agents and executions:
   - Routers → services → repositories, Alembic migrations, SQLite for local development and PostgreSQL for production.
   - A uniform `{code, message, details}` error envelope, request ids, security headers, pagination and server-side validation and risk scoring.
-  - **No authentication or authorization**, and **no agent runtime**: requesting an execution records a queued row and nothing else.
+  - Password sign-in, server-side sessions in HttpOnly cookies, CSRF protection, sign-in throttling, organizations with memberships, and four roles (viewer, member, admin, owner) enforced on every endpoint.
+  - **No agent runtime**: requesting an execution records a queued row and nothing else.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
-**What does not exist yet:** authentication, authorization, rate limiting, a real
-agent registry, agent execution, sandboxing, LLM integration, security scanning,
-monitoring and deployment. Directories for these areas are placeholders. Because
-there is no authentication yet, the backend must only be run on a trusted machine,
-bound to loopback, with demonstration data.
+**What does not exist yet:** MFA and SSO, email delivery (so no password reset or
+email verification), an audit log, a real agent registry, agent execution,
+sandboxing, LLM integration, security scanning, monitoring and deployment.
+Directories for these areas are placeholders. Nothing here has been deployed,
+penetration-tested or reviewed outside this repository: run it locally, with
+demonstration data.
 
 ## Technology stack
 
 | Area | Current (Phases 0–2) | Planned |
 | --- | --- | --- |
-| Frontend | React 19, TypeScript 6 (strict), Vite 8, Tailwind CSS 4, React Router, TanStack Query, Zustand, React Hook Form, Zod, lucide-react, ESLint 10, Vitest 5, Testing Library | Authentication-aware UI (Phase 3), pagination for large collections |
-| Backend | Python, FastAPI, Pydantic v2, pydantic-settings, Uvicorn, SQLAlchemy 2 (async), Alembic, asyncpg, pytest, Ruff, mypy | Auth, background jobs, agent orchestration |
+| Frontend | React 19, TypeScript 6 (strict), Vite 8, Tailwind CSS 4, React Router, TanStack Query, Zustand, React Hook Form, Zod, lucide-react, ESLint 10, Vitest 5, Testing Library | Pagination for large collections, approval workflows |
+| Backend | Python, FastAPI, Pydantic v2, pydantic-settings, Uvicorn, SQLAlchemy 2 (async), Alembic, asyncpg, scrypt (stdlib) for passwords, pytest, Ruff, mypy | MFA/SSO, background jobs, agent orchestration |
 | Database | PostgreSQL 17 (SQLite for local development and tests) | Tenant isolation, row-level security, Redis |
 | Cache / queue | — | Redis |
 | Containers | Docker Compose for local PostgreSQL (optional) | Docker for agent sandboxes and deployment |
@@ -105,6 +108,14 @@ $env:ENVIRONMENT = 'development'
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+`seed_demo` creates a demonstration organization with three accounts and prints
+their generated passwords **once**. For your own account, which prompts for the
+password instead of taking it as an argument:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.create_user --email you@example.com --name "Your Name" --organization "Your Workspace" --role owner
+```
+
 Check it: `http://127.0.0.1:8000/api/v1/health`. The migrations create
 `backend/agenthub-dev.db` (SQLite); set `DATABASE_URL` in `.env` to use PostgreSQL
 instead — see [docs/BACKEND.md](docs/BACKEND.md).
@@ -118,10 +129,13 @@ npm run dev
 ```
 
 Open `http://127.0.0.1:5173`. The UI starts in **demo mode** and works without the
-backend. With the backend running, switch to the real API in **Settings → API →
-Data source → Backend API**; agents, executions and the dashboard counts then come
-from the database, and the header badge changes from *Demo mode* to *API mode*.
-Sections the backend does not implement yet stay labelled as demonstration data.
+backend; it signs you in as a demonstration user and any password is accepted.
+
+With the backend running, switch to the real API in **Settings → API → Data source
+→ Backend API**. The app then asks you to sign in with a real account, and agents,
+executions, members and the dashboard counts come from the database. The header
+badge changes from *Demo mode* to *API mode*, and sections the backend does not
+implement yet stay labelled as demonstration data.
 
 **Windows note:** the npm scripts invoke tools via `node node_modules/...` rather
 than `npx` or `.bin` shims, because `cmd.exe` mis-parses shim paths containing `&`
@@ -161,13 +175,13 @@ AgentHub/
 │   ├── src/stores/        Zustand stores (theme/sidebar, toasts)
 │   └── src/test/          Test setup and render harness
 ├── backend/               FastAPI service (see docs/BACKEND.md)
-│   ├── app/core/          Configuration, errors, logging, middleware, pagination
-│   ├── app/api/v1/        Versioned API routes (health, agents, executions)
+│   ├── app/core/          Configuration, errors, logging, middleware, pagination, password hashing
+│   ├── app/api/v1/        Versioned API routes (health, auth, agents, executions, members)
 │   ├── app/db/            Engine, session and ORM models
 │   ├── app/repositories/  Database queries
 │   ├── app/schemas/       Request/response models
 │   ├── app/services/      Business rules and risk scoring
-│   ├── scripts/           Demonstration seed script
+│   ├── scripts/           Account creation and demonstration seed scripts
 │   └── tests/             pytest suite
 ├── agents/                Placeholder: future agent layer
 │   ├── runtime/           Agent execution orchestration
@@ -198,7 +212,7 @@ AgentHub/
 | 0 | Initialization: repository, tooling, skeletons, CI |
 | 1 | Frontend: application shell, routing, design system, UI against a clearly labelled mock API |
 | 2 | Backend: API structure, PostgreSQL, migrations, error handling ✅ |
-| 3 | Authentication / RBAC: identity, sessions, roles, server-side authorization |
+| 3 | Authentication / RBAC: identity, sessions, roles, server-side authorization ✅ |
 | 4 | Agent registry: agent manifests, versions, permissions model, marketplace data |
 | 5 | Agent runtime: execution lifecycle, orchestration, approvals |
 | 6 | Docker sandbox: isolated, resource-limited, credential-free execution |

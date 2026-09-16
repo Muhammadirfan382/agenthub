@@ -1,7 +1,9 @@
-import { ChevronDown, LogOut, User } from 'lucide-react';
+import { Building2, ChevronDown, LogOut, User, Users } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { DropdownMenu } from '@/components/ui/DropdownMenu';
-import { useCurrentUser } from '@/features/settings/api';
+import { useCurrentSession, useLogout } from '@/features/auth/api';
+import { useServices } from '@/services/ServicesContext';
+import { ROLE_LABELS } from '@/types/domain';
 
 function initials(name: string): string {
   return name
@@ -12,11 +14,14 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-/** Shows the placeholder demo profile. There is no authentication yet. */
 export function UserMenu() {
   const navigate = useNavigate();
-  const { data: user } = useCurrentUser();
-  const name = user?.name ?? 'Demo User';
+  const session = useCurrentSession();
+  const logout = useLogout();
+  const { dataSource } = useServices();
+
+  const name = session?.user.name ?? 'Signed out';
+  const subtitle = session ? `${session.organization.name} · ${ROLE_LABELS[session.role]}` : 'No session';
 
   return (
     <DropdownMenu
@@ -29,14 +34,39 @@ export function UserMenu() {
           </span>
           <span className="hidden text-left md:block">
             <span className="block text-xs leading-tight font-medium text-fg">{name}</span>
-            <span className="block text-[11px] leading-tight text-fg-subtle">Demo session</span>
+            <span className="block text-[11px] leading-tight text-fg-subtle">{subtitle}</span>
           </span>
           <ChevronDown aria-hidden="true" className="hidden size-3.5 text-fg-subtle md:block" />
         </>
       }
       items={[
-        { id: 'profile', label: 'Profile settings', icon: User, onSelect: () => navigate('/settings?section=profile') },
-        { id: 'signout', label: 'Sign out (not available yet)', icon: LogOut, disabled: true, onSelect: () => undefined },
+        {
+          id: 'profile',
+          label: 'Profile settings',
+          icon: User,
+          onSelect: () => navigate('/settings?section=profile'),
+        },
+        {
+          id: 'organization',
+          label: dataSource === 'demo' ? 'Demo workspace' : (session?.organization.name ?? 'Organization'),
+          icon: Building2,
+          disabled: true,
+          onSelect: () => undefined,
+        },
+        {
+          id: 'members',
+          label: 'Members',
+          icon: Users,
+          onSelect: () => navigate('/settings?section=members'),
+        },
+        {
+          id: 'signout',
+          label: logout.isPending ? 'Signing out…' : 'Sign out',
+          icon: LogOut,
+          disabled: logout.isPending,
+          onSelect: () =>
+            logout.mutate(undefined, { onSettled: () => navigate('/login', { replace: true }) }),
+        },
       ]}
     />
   );
