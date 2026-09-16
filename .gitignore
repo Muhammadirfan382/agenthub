@@ -76,3 +76,7 @@ $RECYCLE.BIN/
 # Tool-local settings
 # ---------------------------------------------------------------------------
 .claude/settings.local.json
+
+# Local SQLite development databases
+*.db
+*.db-journal

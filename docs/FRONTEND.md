@@ -132,9 +132,26 @@ authorization control.
   - Validates every response with a Zod schema.
   - Throws a typed `ApiError` (`network_error`, `http_<status>`, `invalid_json`, `invalid_response`).
 
-**Phase 2 swap:** add HTTP implementations of the contracts under `services/http/`,
-return them from `createServices()`, and keep the demo implementation for tests and
-offline demos. No page or component should need to change.
+- **HTTP implementation (Phase 2):** `services/http/agentApi.ts` and
+  `executionApi.ts` implement `AgentService` and `ExecutionService` against
+  `/api/v1`, with response schemas in `services/http/schemas.ts` typed as
+  `z.ZodType<Agent>` so a schema that drifts from the domain type fails the build.
+  A 404 on a detail request becomes `null`; other failures raise `ApiError`
+  carrying the backend's own `code` and `message`.
+
+### Data source
+
+`createServices(dataSource)` returns either the demo services or
+`createHttpServices()`. The starting value comes from `VITE_DATA_SOURCE` and the
+user can switch it in **Settings → API**; the choice is persisted per browser in
+`stores/dataSourceStore.ts`. Switching rebuilds the services **and** the query
+cache, so demo rows can never be displayed as backend data.
+
+In API mode the backend serves agents, executions and the dashboard counts derived
+from them. Marketplace, security, analytics and the profile still come from demo
+data. `services.liveResources` states exactly which resources are real, and
+`useIsLive(resource)` drives the `DataNotice` on each page, so no page can keep
+claiming "demonstration data" while reading from the backend.
 
 ## 6. Mock data
 
@@ -154,6 +171,7 @@ must never contain secrets.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | empty | Backend base URL without trailing slash. Empty means same-origin; the Vite dev server proxies `/api` to `http://127.0.0.1:8000`. Validated to be empty or `http(s)`. |
+| `VITE_DATA_SOURCE` | `demo` | `demo` or `api`. Which services the app starts with; a user's choice in Settings overrides it for that browser. |
 
 The backend's `.env` (repository root) is **not** read by the frontend.
 

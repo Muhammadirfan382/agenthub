@@ -25,9 +25,10 @@ aims to make that safe to do inside an organization by combining two things:
 | --- | --- | --- |
 | 0 | Project initialization | ✅ Complete |
 | 1 | Frontend and UI (demonstration data) | ✅ Complete |
-| 2–10 | Backend, auth, registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
+| 2 | Backend: API, PostgreSQL, migrations | ✅ Complete |
+| 3–10 | Auth, registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–1):**
+**What exists today (Phases 0–2):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -35,25 +36,29 @@ aims to make that safe to do inside an organization by combining two things:
 - A React + TypeScript frontend ([docs/FRONTEND.md](docs/FRONTEND.md)):
   - Screens: application shell, dashboard, agent management (list, details, create/edit), marketplace, executions (list and detail), security dashboard, analytics and settings.
   - Foundations: a reusable design system and a typed service layer.
-  - Data: everything runs on **clearly labelled demonstration data**. The only real backend call is the connection test in Settings.
-- A minimal FastAPI backend with one endpoint: `GET /api/v1/health`.
+  - Data: two modes, switchable in **Settings → API**. *Demo* answers everything from **clearly labelled demonstration data**; *API* reads agents, executions and dashboard counts from the backend and keeps saying which sections are still demo data.
+- A FastAPI backend ([docs/BACKEND.md](docs/BACKEND.md)) that persists agents and executions:
+  - Routers → services → repositories, Alembic migrations, SQLite for local development and PostgreSQL for production.
+  - A uniform `{code, message, details}` error envelope, request ids, security headers, pagination and server-side validation and risk scoring.
+  - **No authentication or authorization**, and **no agent runtime**: requesting an execution records a queued row and nothing else.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
-**What does not exist yet:** backend integration for the UI, authentication,
-authorization, a database, a real agent registry, agent execution, sandboxing, LLM
-integration, security scanning, monitoring and deployment. Directories for these
-areas are placeholders.
+**What does not exist yet:** authentication, authorization, rate limiting, a real
+agent registry, agent execution, sandboxing, LLM integration, security scanning,
+monitoring and deployment. Directories for these areas are placeholders. Because
+there is no authentication yet, the backend must only be run on a trusted machine,
+bound to loopback, with demonstration data.
 
 ## Technology stack
 
-| Area | Current (Phase 0) | Planned |
+| Area | Current (Phases 0–2) | Planned |
 | --- | --- | --- |
-| Frontend | React 19, TypeScript 6 (strict), Vite 8, Tailwind CSS 4, React Router, TanStack Query, Zustand, React Hook Form, Zod, lucide-react, ESLint 10, Vitest 5, Testing Library | HTTP service implementations against the real backend (Phase 2), authentication-aware UI (Phase 3) |
-| Backend | Python, FastAPI, Pydantic v2, pydantic-settings, Uvicorn, pytest, Ruff, mypy | Domain services, persistence, background jobs |
-| Database | — | PostgreSQL |
+| Frontend | React 19, TypeScript 6 (strict), Vite 8, Tailwind CSS 4, React Router, TanStack Query, Zustand, React Hook Form, Zod, lucide-react, ESLint 10, Vitest 5, Testing Library | Authentication-aware UI (Phase 3), pagination for large collections |
+| Backend | Python, FastAPI, Pydantic v2, pydantic-settings, Uvicorn, SQLAlchemy 2 (async), Alembic, asyncpg, pytest, Ruff, mypy | Auth, background jobs, agent orchestration |
+| Database | PostgreSQL 17 (SQLite for local development and tests) | Tenant isolation, row-level security, Redis |
 | Cache / queue | — | Redis |
-| Containers | — | Docker (local services, agent sandboxes) |
+| Containers | Docker Compose for local PostgreSQL (optional) | Docker for agent sandboxes and deployment |
 | CI/CD | GitHub Actions (lint, type check, test, build) | Security scanning, image builds, deployment |
 | AI / agents | — | Modular provider and runtime architecture behind a gateway |
 
@@ -82,7 +87,7 @@ which parts exist today and which are planned, are in
 | npm | 10+ | 11.13.0 | Frontend |
 | Python | 3.12+ | 3.14.3 | Backend |
 | pip | recent | 26.0.1 | Backend |
-| Docker Desktop (with Compose v2) | — | not installed | **Not needed yet.** Required from the phase that introduces PostgreSQL / sandboxes. |
+| Docker Desktop (with Compose v2) | any recent | not installed | **Optional.** Only to run PostgreSQL locally; development defaults to a SQLite file. Required later for agent sandboxes. |
 
 ## Running AgentHub locally (Windows PowerShell)
 
@@ -94,10 +99,15 @@ Open two terminals at the repository root.
 cd backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+$env:ENVIRONMENT = 'development'
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m scripts.seed_demo
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Check it: `http://127.0.0.1:8000/api/v1/health`.
+Check it: `http://127.0.0.1:8000/api/v1/health`. The migrations create
+`backend/agenthub-dev.db` (SQLite); set `DATABASE_URL` in `.env` to use PostgreSQL
+instead — see [docs/BACKEND.md](docs/BACKEND.md).
 
 **Terminal 2: frontend**
 
@@ -107,9 +117,11 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. The UI works without the backend because it uses demo
-data. To check the real connection, start the backend and use **Settings → API → Test
-connection**, which calls it through the Vite development proxy.
+Open `http://127.0.0.1:5173`. The UI starts in **demo mode** and works without the
+backend. With the backend running, switch to the real API in **Settings → API →
+Data source → Backend API**; agents, executions and the dashboard counts then come
+from the database, and the header badge changes from *Demo mode* to *API mode*.
+Sections the backend does not implement yet stay labelled as demonstration data.
 
 **Windows note:** the npm scripts invoke tools via `node node_modules/...` rather
 than `npx` or `.bin` shims, because `cmd.exe` mis-parses shim paths containing `&`
@@ -148,21 +160,26 @@ AgentHub/
 │   ├── src/services/      Service contracts, demo implementations, HTTP client
 │   ├── src/stores/        Zustand stores (theme/sidebar, toasts)
 │   └── src/test/          Test setup and render harness
-├── backend/               FastAPI service
-│   ├── app/core/          Environment-based configuration
-│   ├── app/api/v1/        Versioned API routes (health)
+├── backend/               FastAPI service (see docs/BACKEND.md)
+│   ├── app/core/          Configuration, errors, logging, middleware, pagination
+│   ├── app/api/v1/        Versioned API routes (health, agents, executions)
+│   ├── app/db/            Engine, session and ORM models
+│   ├── app/repositories/  Database queries
+│   ├── app/schemas/       Request/response models
+│   ├── app/services/      Business rules and risk scoring
+│   ├── scripts/           Demonstration seed script
 │   └── tests/             pytest suite
 ├── agents/                Placeholder: future agent layer
 │   ├── runtime/           Agent execution orchestration
 │   ├── sandbox/           Isolated execution environment
 │   ├── tools/             Tool definitions and gateway adapters
 │   └── policies/          Permission and policy definitions
-├── database/              Placeholder
-│   ├── migrations/        Schema migrations
-│   └── schema/            Schema documentation
-├── infrastructure/        Placeholder
-│   ├── docker/            Dockerfiles
-│   ├── compose/           Local multi-service Compose files
+├── database/
+│   ├── migrations/        Alembic environment and versioned migrations
+│   └── schema/            Schema documentation (placeholder)
+├── infrastructure/
+│   ├── docker/            Dockerfiles (placeholder)
+│   ├── compose/           Local PostgreSQL for development
 │   └── deployment/        Deployment configuration
 ├── scripts/               Developer scripts (placeholder)
 ├── docs/                  Roadmap and design documents
@@ -180,7 +197,7 @@ AgentHub/
 | --- | --- |
 | 0 | Initialization: repository, tooling, skeletons, CI |
 | 1 | Frontend: application shell, routing, design system, UI against a clearly labelled mock API |
-| 2 | Backend: API structure, PostgreSQL, migrations, error handling |
+| 2 | Backend: API structure, PostgreSQL, migrations, error handling ✅ |
 | 3 | Authentication / RBAC: identity, sessions, roles, server-side authorization |
 | 4 | Agent registry: agent manifests, versions, permissions model, marketplace data |
 | 5 | Agent runtime: execution lifecycle, orchestration, approvals |

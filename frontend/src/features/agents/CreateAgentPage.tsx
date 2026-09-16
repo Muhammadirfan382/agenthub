@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { toast } from '@/stores/toastStore';
 import { useCreateAgent } from './api';
@@ -17,9 +17,12 @@ export default function CreateAgentPage() {
         description="Configure identity, model, tools, permissions, limits and security policy."
         breadcrumbs={[{ label: 'Agents', to: '/agents' }, { label: 'Create agent' }]}
       />
-      <DemoNotice className="mb-6">
-        The agent is saved in this browser session only. Nothing is sent to a backend and the agent cannot run yet.
-      </DemoNotice>
+      <DataNotice
+        resource="agents"
+        className="mb-6"
+        demo="The agent is saved in this browser session only. Nothing is sent to a backend and the agent cannot run yet."
+        live="The agent is saved to the AgentHub database. Permissions here are configuration only: no runtime enforces them yet."
+      />
       <AgentForm
         defaultValues={defaultAgentFormValues}
         submitLabel="Create agent"

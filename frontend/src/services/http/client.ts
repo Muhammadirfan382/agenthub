@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import { appConfig, type AppConfig } from '@/config/env';
 
 /**
@@ -30,6 +30,9 @@ export interface RequestOptions {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/** The error envelope the backend returns for every failure. */
+const ErrorBodySchema = z.object({ code: z.string().max(64), message: z.string().max(500) });
+
 export function buildUrl(path: string, config: AppConfig = appConfig): string {
   if (!path.startsWith('/') || path.startsWith('//')) {
     throw new Error(`API paths must be absolute paths on the API origin, received "${path}".`);
@@ -37,12 +40,22 @@ export function buildUrl(path: string, config: AppConfig = appConfig): string {
   return `${config.apiBaseUrl}${path}`;
 }
 
-export async function apiRequest<T>(
-  path: string,
-  schema: z.ZodType<T>,
-  options: RequestOptions = {},
-  config: AppConfig = appConfig,
-): Promise<T> {
+/** Prefers the backend's own message, so users see "Name already in use", not "HTTP 409". */
+async function toApiError(response: Response): Promise<ApiError> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = undefined;
+  }
+  const parsed = ErrorBodySchema.safeParse(body);
+  if (parsed.success) {
+    return new ApiError(parsed.data.message, response.status, parsed.data.code);
+  }
+  return new ApiError(`The AgentHub API responded with HTTP ${response.status}.`, response.status, `http_${response.status}`);
+}
+
+async function send(path: string, options: RequestOptions, config: AppConfig): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const onExternalAbort = () => controller.abort();
@@ -66,23 +79,42 @@ export async function apiRequest<T>(
     }
 
     if (!response.ok) {
-      throw new ApiError(`The AgentHub API responded with HTTP ${response.status}.`, response.status, `http_${response.status}`);
+      throw await toApiError(response);
     }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new ApiError('The AgentHub API returned a response that is not JSON.', response.status, 'invalid_json');
-    }
-
-    const parsed = schema.safeParse(payload);
-    if (!parsed.success) {
-      throw new ApiError('The AgentHub API returned an unexpected response.', response.status, 'invalid_response');
-    }
-    return parsed.data;
+    return response;
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener('abort', onExternalAbort);
   }
+}
+
+export async function apiRequest<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  options: RequestOptions = {},
+  config: AppConfig = appConfig,
+): Promise<T> {
+  const response = await send(path, options, config);
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiError('The AgentHub API returned a response that is not JSON.', response.status, 'invalid_json');
+  }
+
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    throw new ApiError('The AgentHub API returned an unexpected response.', response.status, 'invalid_response');
+  }
+  return parsed.data;
+}
+
+/** For endpoints that answer with no content, such as DELETE. */
+export async function apiRequestVoid(
+  path: string,
+  options: RequestOptions = {},
+  config: AppConfig = appConfig,
+): Promise<void> {
+  await send(path, options, config);
 }

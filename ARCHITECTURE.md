@@ -81,14 +81,25 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 ### Current implementation
 
-- FastAPI application factory `app.main:create_app`; module-level `app` for Uvicorn.
+- FastAPI application factory `app.main:create_app`; `app.main:app` is built on
+  first access, so importing the module never requires configuration.
 - Configuration via `pydantic-settings` (`app/core/config.py`): reads environment
   variables and an optional repository-root `.env`, ignores unknown keys, and
   defaults to `ENVIRONMENT=production`.
-- One versioned router (`/api/v1`) with `GET /api/v1/health`, returning
-  `{status, service, version, message}` through a Pydantic response model.
+- Versioned router (`/api/v1`): health, agents and executions. Layering is
+  routers → services (business rules, risk scoring) → repositories (queries);
+  Pydantic models at every boundary, camelCase on the wire.
+- Persistence with SQLAlchemy 2 (async) and Alembic migrations: SQLite for local
+  development and tests, PostgreSQL for staging and production.
+- Cross-cutting: `{code, message, details}` error envelope that never leaks
+  internals, `X-Request-ID` middleware feeding structured JSON logs, security
+  headers, and offset pagination (`{items, total, limit, offset}`).
+- Server-side validation is authoritative: permission completeness, egress
+  allow-lists, status transitions and risk scores are decided by the backend.
+  Requesting an execution records a queued row; nothing runs.
 - API docs (`/api/docs`, `/api/openapi.json`) only when `ENVIRONMENT=development`.
-- No CORS middleware, no database, no authentication, no background workers.
+- No CORS middleware, no authentication, no authorization, no rate limiting and
+  no background workers. Every request is attributed to one placeholder user.
 - Tooling: pytest (with FastAPI `TestClient` over httpx2), Ruff (including
   flake8-bandit security rules), mypy in strict mode with the Pydantic plugin.
 
@@ -96,8 +107,7 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 - Layered structure: API routers → services (business rules) → repositories (data
   access); Pydantic models at every boundary.
-- PostgreSQL persistence with migrations, consistent error responses, request IDs,
-  pagination and rate limiting (Phase 2).
+- Rate limiting and CORS configuration for a separate frontend origin.
 - Authentication (sessions or tokens, MFA/SSO options) and role-based access
   control enforced on every endpoint (Phase 3).
 - Agent registry, installation and permission-grant APIs (Phase 4).
@@ -109,8 +119,17 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 ### Current implementation
 
-None. `database/migrations/` and `database/schema/` are empty placeholders. The
-backend does not connect to any database.
+- `agents` and `executions` tables, created by Alembic migrations in
+  `database/migrations/versions/`.
+- Configuration documents (model, tools, permissions, limits, policy, versions,
+  security checks) are JSON columns: `JSON` on SQLite, `JSONB` on PostgreSQL.
+- `executions.agent_id` references `agents.id` with `ON DELETE CASCADE`; SQLite
+  connections enable `PRAGMA foreign_keys=ON` so local behaviour matches
+  PostgreSQL.
+- Local development defaults to a SQLite file; `infrastructure/compose/` runs
+  PostgreSQL 17 on loopback for a production-like setup. Production requires
+  `DATABASE_URL` and refuses to start without it.
+- No users, organizations, grants, approvals or audit tables yet.
 
 ### Planned architecture
 

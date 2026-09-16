@@ -1,6 +1,6 @@
 import { SearchX } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { LoadingState } from '@/components/feedback/LoadingState';
@@ -45,7 +45,12 @@ function EditAgent({ agent }: { agent: Agent }) {
         title={`Edit ${agent.name}`}
         breadcrumbs={[{ label: 'Agents', to: '/agents' }, { label: agent.name, to: `/agents/${agent.id}` }, { label: 'Edit' }]}
       />
-      <DemoNotice className="mb-6">Changes are saved in this browser session only.</DemoNotice>
+      <DataNotice
+        resource="agents"
+        className="mb-6"
+        demo="Changes are saved in this browser session only."
+        live="Changes are saved to the AgentHub database."
+      />
       <AgentForm
         key={agent.id}
         defaultValues={agentToFormValues(agent)}

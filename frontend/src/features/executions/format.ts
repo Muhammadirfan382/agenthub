@@ -6,7 +6,8 @@ export function executionResultText(execution: Execution): string {
     case 'COMPLETED':
       return execution.resultSummary ?? 'Completed';
     case 'FAILED':
-      return 'Failed: tool error';
+      // The cause is only known once the runtime records one.
+      return execution.resultSummary ?? 'Failed';
     case 'TIMEOUT':
       return 'Stopped at runtime limit';
     case 'CANCELLED':

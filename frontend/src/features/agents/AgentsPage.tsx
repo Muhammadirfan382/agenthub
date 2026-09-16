@@ -1,7 +1,7 @@
 import { Bot, Plus, SearchX } from 'lucide-react';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { QueryState } from '@/components/feedback/QueryState';
@@ -58,9 +58,12 @@ export default function AgentsPage() {
         }
       />
 
-      <DemoNotice className="mb-4">
-        Agents shown here are demonstration data. Create, edit, execute and delete change only this browser session.
-      </DemoNotice>
+      <DataNotice
+        resource="agents"
+        className="mb-4"
+        demo="Agents shown here are demonstration data. Create, edit, execute and delete change only this browser session."
+        live="Agents are stored in the AgentHub database. They cannot run yet: requesting an execution records a queued row and nothing else."
+      />
 
       <AgentFilters params={params} onChange={update} view={view} onViewChange={setView} />
 

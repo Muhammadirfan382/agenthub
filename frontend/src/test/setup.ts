@@ -2,8 +2,10 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
-// Route modules are lazy-loaded; the first import in jsdom can be slow.
-configure({ asyncUtilTimeout: 5000 });
+// Route modules are lazy-loaded; the first import in jsdom can be slow, and
+// slower still when every test file runs in its own worker.
+configure({ asyncUtilTimeout: 10000 });
+import { useDataSourceStore } from '@/stores/dataSourceStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -47,5 +49,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   useToastStore.setState({ toasts: [] });
   useUiStore.setState({ theme: 'system', sidebarCollapsed: false, mobileNavOpen: false });
+  useDataSourceStore.setState({ dataSource: 'demo' });
   localStorage.clear();
 });

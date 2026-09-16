@@ -1,8 +1,8 @@
 import { Menu, Plus } from 'lucide-react';
 import { LinkButton } from '@/components/ui/Button';
 import { buttonClasses } from '@/components/ui/buttonStyles';
-import { DemoBadge } from '@/components/feedback/DemoNotice';
 import { useUiStore } from '@/stores/uiStore';
+import { DataSourceBadge } from './DataSourceBadge';
 import { LogoMark } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
@@ -27,7 +27,7 @@ export function Header() {
       </span>
 
       <div className="hidden sm:block">
-        <DemoBadge label="Demo mode" />
+        <DataSourceBadge />
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">

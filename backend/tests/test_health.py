@@ -12,7 +12,7 @@ def test_health_reports_backend_running(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "agenthub-backend",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "message": "AgentHub backend is running.",
     }
 
@@ -48,4 +48,9 @@ def test_api_docs_enabled_in_development(make_client: ClientFactory) -> None:
 
 
 def test_settings_default_to_production() -> None:
-    assert Settings(_env_file=None).environment == "production"
+    # Production also demands DATABASE_URL, so supply a throwaway one to read the default.
+    settings = Settings(
+        _env_file=None, database_url="postgresql+asyncpg://user@db.invalid/agenthub"
+    )
+
+    assert settings.environment == "production"

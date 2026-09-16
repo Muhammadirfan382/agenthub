@@ -1,18 +1,26 @@
 import { SearchX } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { DemoBadge, DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice, DemoBadge } from '@/components/feedback/DemoNotice';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExecutionStatusBadge } from '@/components/status/StatusBadges';
 import { Alert } from '@/components/ui/Alert';
+import { Badge } from '@/components/ui/Badge';
 import { LinkButton } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { formatDateTime, formatDuration, formatNumber } from '@/lib/format';
 import type { ExecutionDetail } from '@/types/domain';
+import { useIsLive } from '@/services/useIsLive';
 import { useExecution } from './api';
+
+/** An empty trace means different things in demo mode and against the real backend. */
+function ExecutionTraceBadge() {
+  const live = useIsLive('executions');
+  return live ? <Badge tone="neutral">No trace recorded</Badge> : <DemoBadge label="Demo data · not real-time" />;
+}
 import { ExecutionTimeline } from './components/ExecutionTimeline';
 import { LogList } from './components/LogList';
 import { ToolCallsTable } from './components/ToolCallsTable';
@@ -69,14 +77,17 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
         meta={
           <>
             <ExecutionStatusBadge status={execution.status} />
-            <DemoBadge label="Demo data · not real-time" />
+            <ExecutionTraceBadge />
           </>
         }
       />
 
-      <DemoNotice className="mb-6">
-        Timeline, logs and tool calls are generated demonstration data. They are not streamed from a running agent.
-      </DemoNotice>
+      <DataNotice
+        resource="executions"
+        className="mb-6"
+        demo="Timeline, logs and tool calls are generated demonstration data. They are not streamed from a running agent."
+        live="This is a stored execution record. Timeline, logs and tool calls stay empty until the agent runtime records them."
+      />
 
       {execution.error && (
         <Alert tone="danger" title={`Error: ${execution.error.code}`} className="mb-6">

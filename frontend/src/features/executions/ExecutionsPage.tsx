@@ -1,6 +1,6 @@
 import { Activity, SearchX } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { QueryState } from '@/components/feedback/QueryState';
@@ -56,10 +56,12 @@ export default function ExecutionsPage() {
     <>
       <PageHeader title="Executions" description="Monitor agent runs: status, duration, model usage, tool calls and outcomes." />
 
-      <DemoNotice className="mb-6">
-        Executions are demonstration data and are not updated in real time. Real execution monitoring arrives with the
-        agent runtime.
-      </DemoNotice>
+      <DataNotice
+        resource="executions"
+        className="mb-6"
+        demo="Executions are demonstration data and are not updated in real time. Real execution monitoring arrives with the agent runtime."
+        live="Executions are records stored by the backend. Nothing runs yet, so a requested execution stays queued until the agent runtime exists."
+      />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
         <SearchInput label="Search executions" placeholder="Search by execution ID or agent" value={search} onChange={(e) => update({ search: e.target.value })} />

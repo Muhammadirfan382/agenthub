@@ -84,3 +84,60 @@ jobs:
 
       - name: Test
         run: python -m pytest
+
+  migrations:
+    name: Migrations (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: agenthub
+          # Throwaway value for an ephemeral CI container that is never exposed
+          # outside this job. Not a secret and not used anywhere else.
+          POSTGRES_PASSWORD: ci_local_only
+          POSTGRES_DB: agenthub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agenthub -d agenthub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+asyncpg://agenthub:ci_local_only@127.0.0.1:5432/agenthub
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Apply migrations
+        run: python -m alembic upgrade head
+
+      # Fails if the models have drifted away from the migrations.
+      - name: Check for un-migrated model changes
+        run: python -m alembic check
+
+      - name: Check the migration can be rolled back and reapplied
+        run: |
+          python -m alembic downgrade base
+          python -m alembic upgrade head
+
+      - name: Seed demonstration data
+        run: python -m scripts.seed_demo

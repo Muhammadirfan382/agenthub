@@ -1,5 +1,5 @@
 import { Activity, Plus } from 'lucide-react';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { LinkButton } from '@/components/ui/Button';
 import { MetricsGrid } from './components/MetricsGrid';
@@ -27,10 +27,12 @@ export default function DashboardPage() {
         }
       />
 
-      <DemoNotice className="mb-6">
-        Metrics, activity and system status on this page are demonstration data. They do not reflect a real backend,
-        real agents or real executions.
-      </DemoNotice>
+      <DataNotice
+        resource="dashboard"
+        className="mb-6"
+        demo="Metrics, activity and system status on this page are demonstration data. They do not reflect a real backend, real agents or real executions."
+        live="Agent and execution counts come from the backend. Recent activity, system status and security figures on this page are still demonstration data."
+      />
 
       <MetricsGrid />
 

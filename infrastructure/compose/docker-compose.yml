@@ -1,0 +1,27 @@
+# Local PostgreSQL for AgentHub development.
+#
+#   docker compose -f infrastructure/compose/docker-compose.yml up -d
+#
+# Development credentials only: this file must never hold production secrets,
+# and the port is published on the loopback interface only.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: agenthub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agenthub
+      POSTGRES_PASSWORD: agenthub_local_dev
+      POSTGRES_DB: agenthub
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - agenthub-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthub -d agenthub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  agenthub-postgres-data:

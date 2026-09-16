@@ -6,6 +6,7 @@ import { ExecutionStatusBadge } from '@/components/status/StatusBadges';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { type Column, DataTable } from '@/components/ui/DataTable';
 import { useExecutions } from '@/features/executions/api';
+import { useIsLive } from '@/services/useIsLive';
 import { executionResultText } from '@/features/executions/format';
 import { formatDuration, formatRelative } from '@/lib/format';
 import type { Execution } from '@/types/domain';
@@ -29,11 +30,12 @@ const columns: Column<Execution>[] = [
 
 export function RecentActivity() {
   const query = useExecutions();
+  const live = useIsLive('executions');
   return (
     <Card>
       <CardHeader
         title="Recent activity"
-        description="Latest agent executions (demo)."
+        description={live ? 'Latest agent executions.' : 'Latest agent executions (demo).'}
         action={
           <Link to="/executions" className="text-sm font-medium text-brand-strong hover:underline focus-visible:outline-2 focus-visible:outline-ring">
             View all

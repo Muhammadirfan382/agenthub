@@ -4,27 +4,80 @@ Run locally with:
     python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 """
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.router import api_router
 from app.core.config import API_V1_PREFIX, SERVICE_VERSION, Settings, get_settings
+from app.core.errors import install_error_handlers
+from app.core.logging import configure_logging
+from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.db.session import create_engine, create_session_factory
+
+logger = logging.getLogger(__name__)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the application. Tests pass explicit settings."""
+def create_app(
+    settings: Settings | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> FastAPI:
+    """Build the application. Tests pass explicit settings and a session factory."""
     resolved = settings if settings is not None else get_settings()
-    docs_enabled = resolved.api_docs_enabled
+    configure_logging()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if session_factory is not None:
+            app.state.engine = None
+            app.state.session_factory = session_factory
+            yield
+            return
+
+        engine = create_engine(resolved)
+        app.state.engine = engine
+        app.state.session_factory = create_session_factory(engine)
+        # Credentials are stripped before logging.
+        logger.info("database configured: %s", resolved.safe_database_url)
+        try:
+            yield
+        finally:
+            await engine.dispose()
+
+    docs_enabled = resolved.api_docs_enabled
     app = FastAPI(
-        title=f"{resolved.app_name} API",
+        title=resolved.app_name + " API",
         version=SERVICE_VERSION,
         docs_url="/api/docs" if docs_enabled else None,
         redoc_url=None,
         openapi_url="/api/openapi.json" if docs_enabled else None,
+        lifespan=lifespan,
     )
     app.state.settings = resolved
+    # Outermost middleware runs first on the way in and last on the way out.
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestContextMiddleware)
+    install_error_handlers(app)
     app.include_router(api_router, prefix=API_V1_PREFIX)
     return app
 
 
-app = create_app()
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str) -> FastAPI:
+    """Build the ASGI app on first access, so `app.main:app` still works.
+
+    Importing this module must not require configuration; starting the server
+    does. Without this, importing the package in a shell or a test would fail
+    whenever DATABASE_URL is unset.
+    """
+    if name == "app":
+        global _app
+        if _app is None:
+            _app = create_app()
+        return _app
+    raise AttributeError(f"module {__name__} has no attribute {name}")

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { parseConfig } from '@/config/env';
+import { type AppConfig, parseConfig } from '@/config/env';
 import { ApiError, apiRequest, buildUrl } from './client';
 
 const schema = z.object({ status: z.literal('ok') });
-const config = { apiBaseUrl: 'https://api.example.com' };
+const config: AppConfig = { apiBaseUrl: 'https://api.example.com', dataSource: 'demo' };
 
 function stubFetch(response: Partial<Response> | Error) {
   const fetchMock = vi.fn(() => (response instanceof Error ? Promise.reject(response) : Promise.resolve(response as Response)));
@@ -46,6 +46,7 @@ describe('http client', () => {
 describe('frontend configuration', () => {
   it('accepts empty or http(s) base URLs and strips trailing slashes', () => {
     expect(parseConfig({}).apiBaseUrl).toBe('');
+    expect(parseConfig({}).dataSource).toBe('demo');
     expect(parseConfig({ VITE_API_BASE_URL: 'https://api.example.com/' }).apiBaseUrl).toBe('https://api.example.com');
   });
 

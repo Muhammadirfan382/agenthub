@@ -9,7 +9,7 @@ designed in detail when it begins.
 | --- | --- | --- |
 | 0 | Initialization | ✅ Complete |
 | 1 | Frontend | ✅ Complete (demonstration data; no backend integration) |
-| 2 | Backend | ⏳ Not started |
+| 2 | Backend | ✅ Complete (agents and executions persisted; no auth) |
 | 3 | Authentication / RBAC | ⏳ Not started |
 | 4 | Agent registry | ⏳ Not started |
 | 5 | Agent runtime | ⏳ Not started |
@@ -51,6 +51,17 @@ mock API, using the old prototype only as a UX reference.
 - Consistent error model, request IDs, pagination, input validation.
 - Docker Compose for local PostgreSQL (Docker introduced here).
 - Frontend switched from the mock API to the real one for the implemented resources.
+
+**Delivered:** `agents` and `executions` tables with Alembic migrations; router →
+service → repository layering; `{code, message, details}` errors; `X-Request-ID`
+and security headers; offset pagination; server-side validation and risk scoring;
+SQLite for local development and tests with PostgreSQL exercised in CI; a demo seed
+script; and a frontend data-source switch (demo or API) surfaced in Settings.
+See [BACKEND.md](BACKEND.md).
+
+**Deliberately not in this phase:** authentication, authorization, rate limiting,
+CORS for a separate origin, audit logging, and anything that actually runs an
+agent.
 
 ## Phase 3: Authentication / RBAC
 

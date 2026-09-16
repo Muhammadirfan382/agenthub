@@ -299,6 +299,7 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
 
   return {
     dataSource: 'demo',
+    liveResources: [],
     agents: agentService,
     marketplace: marketplaceService,
     executions: executionService,

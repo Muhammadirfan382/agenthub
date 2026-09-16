@@ -122,10 +122,15 @@ export interface AuthService {
   updateProfile(update: ProfileUpdate): Promise<UserProfile>;
 }
 
-export type DataSource = 'demo';
+export type DataSource = 'demo' | 'api';
+
+/** Parts of the app the real backend can serve today. Everything else is demo data. */
+export type LiveResource = 'agents' | 'executions' | 'dashboard';
 
 export interface Services {
   dataSource: DataSource;
+  /** What the backend really serves in this mode, so the UI can say so accurately. */
+  liveResources: readonly LiveResource[];
   agents: AgentService;
   marketplace: MarketplaceService;
   executions: ExecutionService;
