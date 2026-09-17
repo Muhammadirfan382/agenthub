@@ -3,6 +3,8 @@ import type {
   AgentCategory,
   AgentPermission,
   AgentVersion,
+  Approval,
+  ApprovalDecision,
   AgentStatus,
   AnalyticsSummary,
   BackendHealth,
@@ -23,6 +25,7 @@ import type {
   RiskLevel,
   SecurityEvent,
   SecurityOverview,
+  RuntimeState,
   SecurityPolicy,
   SessionInfo,
   Visibility,
@@ -129,6 +132,22 @@ export interface ExecutionListParams {
 export interface ExecutionService {
   list(params?: ExecutionListParams): Promise<Execution[]>;
   get(id: ID): Promise<ExecutionDetail | null>;
+  /** Asks the runtime to stop at the next step boundary. */
+  cancel(id: ID): Promise<ExecutionDetail>;
+  /** Approvals waiting on a person, across the organization. */
+  pendingApprovals(): Promise<Approval[]>;
+  decideApproval(
+    executionId: ID,
+    approvalId: ID,
+    decision: ApprovalDecision,
+    note?: string,
+  ): Promise<ExecutionDetail>;
+}
+
+export interface RuntimeService {
+  state(): Promise<RuntimeState>;
+  /** The organization-wide stop: blocks new runs and stops running ones. */
+  setExecutionsPaused(paused: boolean, reason?: string): Promise<RuntimeState>;
 }
 
 export interface SecurityService {
@@ -195,7 +214,8 @@ export type LiveResource =
   | 'dashboard'
   | 'members'
   | 'marketplace'
-  | 'installations';
+  | 'installations'
+  | 'runtime';
 
 export interface Services {
   dataSource: DataSource;
@@ -210,4 +230,5 @@ export interface Services {
   auth: AuthService;
   members: MemberService;
   installations: InstallationService;
+  runtime: RuntimeService;
 }

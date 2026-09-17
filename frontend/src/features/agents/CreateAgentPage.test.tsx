@@ -59,9 +59,10 @@ describe('create agent form', () => {
     await user.type(screen.getByLabelText(/^Add tag/), 'release{Enter}');
     await user.click(submitButton());
 
+    // The toast dismisses itself after a few seconds, so assert it first.
+    expect(await screen.findByText('Release Notes Writer created')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { level: 1, name: 'Release Notes Writer' })).toBeInTheDocument();
     expect(router.state.location.pathname).toMatch(/^\/agents\/agt_demo_release_notes_writer_\d+$/);
-    expect(screen.getByText('Release Notes Writer created')).toBeInTheDocument();
     expect(screen.getByText('Draft')).toBeInTheDocument();
   });
 });

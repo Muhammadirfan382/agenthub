@@ -11,7 +11,7 @@ session and CSRF tokens are stored as SHA-256 fingerprints.
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -24,6 +24,14 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # The kill switch: when on, nothing new starts and running work is stopped.
+    executions_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    executions_paused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    executions_paused_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    executions_paused_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class User(Base):

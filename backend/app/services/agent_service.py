@@ -14,8 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, UnprocessableError
 from app.core.time import now_utc
-from app.db.models import Agent, Execution
+from app.db.models import Agent, Execution, Organization
 from app.repositories import agent_repository
+from app.runtime.engine import RUNTIME_NAME
 from app.schemas.agent import AgentDraft
 from app.schemas.enums import AgentStatus, ExecutionTrigger
 from app.services import authorization
@@ -196,13 +197,25 @@ async def request_execution(
     *,
     context: AuthContext,
 ) -> Execution:
-    """Records an execution request. Nothing runs: there is no runtime yet."""
+    """Queues a run for the runtime to pick up.
+
+    The runtime orchestrates but executes nothing: there is no sandbox yet, so
+    the run is recorded by the simulation runtime (see app/runtime/engine.py).
+    """
     agent = await _agent_for_change(session, agent_id, context=context, action="agent:execute")
     if agent.status != "active":
         raise UnprocessableError(
             "Only active agents can be executed. This agent is " + agent.status + "."
         )
 
+    organization = await session.get(Organization, agent.organization_id)
+    if organization is not None and organization.executions_paused:
+        reason = organization.executions_paused_reason or "No reason given."
+        raise UnprocessableError(
+            "Executions are paused for this organization by the kill switch. " + reason
+        )
+
+    limits = agent.resource_limits
     now = now_utc()
     execution = Execution(
         id=new_execution_id(),
@@ -211,8 +224,14 @@ async def request_execution(
         agent_name=agent.name,
         status="QUEUED",
         trigger=trigger,
+        runtime=RUNTIME_NAME,
+        requested_by_id=context.user_id,
+        requested_by_name=context.user.name,
         started_at=now,
         model=str(agent.model.get("model", "unknown")),
+        max_runtime_seconds=int(limits.get("maxRuntimeSeconds", 300)),
+        max_tokens=int(limits.get("maxTokensPerRun", 50_000)),
+        max_tool_calls=int(limits.get("maxToolCalls", 20)),
     )
     agent.last_execution_at = now
     session.add(execution)

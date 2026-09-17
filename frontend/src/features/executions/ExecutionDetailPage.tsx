@@ -1,5 +1,5 @@
-import { SearchX } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Ban, SearchX } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { DataNotice, DemoBadge } from '@/components/feedback/DemoNotice';
 import { EmptyState } from '@/components/feedback/EmptyState';
@@ -8,19 +8,24 @@ import { LoadingState } from '@/components/feedback/LoadingState';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ExecutionStatusBadge } from '@/components/status/StatusBadges';
 import { Alert } from '@/components/ui/Alert';
+import { Button, LinkButton } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Badge } from '@/components/ui/Badge';
-import { LinkButton } from '@/components/ui/Button';
+
 import { Card, CardHeader } from '@/components/ui/Card';
 import { formatDateTime, formatDuration, formatNumber } from '@/lib/format';
-import type { ExecutionDetail } from '@/types/domain';
+import { type ExecutionDetail, isExecutionFinished } from '@/types/domain';
+import { usePermission } from '@/features/auth/api';
 import { useIsLive } from '@/services/useIsLive';
-import { useExecution } from './api';
+import { toast } from '@/stores/toastStore';
+import { useCancelExecution, useExecution, useExecutionStream } from './api';
 
 /** An empty trace means different things in demo mode and against the real backend. */
 function ExecutionTraceBadge() {
   const live = useIsLive('executions');
   return live ? <Badge tone="neutral">No trace recorded</Badge> : <DemoBadge label="Demo data · not real-time" />;
 }
+import { ApprovalPanel } from './components/ApprovalPanel';
 import { ExecutionTimeline } from './components/ExecutionTimeline';
 import { LogList } from './components/LogList';
 import { ToolCallsTable } from './components/ToolCallsTable';
@@ -28,6 +33,9 @@ import { ToolCallsTable } from './components/ToolCallsTable';
 export default function ExecutionDetailPage() {
   const { id = '' } = useParams();
   const query = useExecution(id);
+  const live = Boolean(query.data && !isExecutionFinished(query.data.status));
+  // Watch the server's stream while the run is live; polling covers the rest.
+  useExecutionStream(id, live);
 
   if (query.isPending) return <LoadingState label="Loading execution…" />;
   if (query.isError) return <ErrorState title="Execution could not be loaded" onRetry={() => void query.refetch()} retrying={query.isFetching} />;
@@ -49,6 +57,11 @@ export default function ExecutionDetailPage() {
 }
 
 function Detail({ execution }: { execution: ExecutionDetail }) {
+  const permitted = usePermission();
+  const cancel = useCancelExecution();
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const finished = isExecutionFinished(execution.status);
+
   const metadata: [string, ReactNode][] = [
     [
       'Agent',
@@ -65,6 +78,11 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
     ['Tool calls', formatNumber(execution.toolCallCount)],
     ['Input tokens', formatNumber(execution.tokenUsage.input)],
     ['Output tokens', formatNumber(execution.tokenUsage.output)],
+    ['Requested by', execution.requestedBy || 'Unknown'],
+    [
+      'Budget',
+      `${execution.budget.maxRuntimeSeconds}s · ${formatNumber(execution.budget.maxTokens)} tokens · ${execution.budget.maxToolCalls} tool calls`,
+    ],
   ];
 
   return (
@@ -78,7 +96,20 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
           <>
             <ExecutionStatusBadge status={execution.status} />
             <ExecutionTraceBadge />
+            {execution.cancelRequested && !finished && <Badge tone="warning">Stopping</Badge>}
           </>
+        }
+        actions={
+          finished ? null : (
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmCancel(true)}
+              disabled={!permitted('agent:execute') || execution.cancelRequested}
+            >
+              <Ban aria-hidden="true" className="size-4" />
+              {execution.cancelRequested ? 'Stopping…' : 'Cancel run'}
+            </Button>
+          )
         }
       />
 
@@ -86,13 +117,19 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
         resource="executions"
         className="mb-6"
         demo="Timeline, logs and tool calls are generated demonstration data. They are not streamed from a running agent."
-        live="This is a stored execution record. Timeline, logs and tool calls stay empty until the agent runtime records them."
+        live="The runtime orchestrated this run and recorded every step, but executed nothing: there is no sandbox yet, so no agent code, model or tool was actually run."
       />
 
       {execution.error && (
         <Alert tone="danger" title={`Error: ${execution.error.code}`} className="mb-6">
           {execution.error.message}
         </Alert>
+      )}
+
+      {execution.approvals.length > 0 && (
+        <div className="mb-6">
+          <ApprovalPanel approvals={execution.approvals} />
+        </div>
       )}
 
       <div className="grid gap-6 xl:grid-cols-3">
@@ -139,11 +176,36 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
       </Card>
 
       <Card className="mt-6">
-        <CardHeader title="Logs" description="Operational log entries (demo)." />
+        <CardHeader
+          title="Logs"
+          description="What the runtime wrote while orchestrating this run."
+        />
         <div className="p-4">
           <LogList logs={execution.logs} />
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        tone="danger"
+        title="Cancel this run?"
+        description="The runtime stops it at the next step boundary. Steps already recorded stay in the record."
+        confirmLabel="Stop the run"
+        pending={cancel.isPending}
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={() =>
+          cancel.mutate(execution.id, {
+            onSuccess: () => {
+              setConfirmCancel(false);
+              toast.success('Cancellation requested', 'The run stops at the next step.');
+            },
+            onError: (error) => {
+              setConfirmCancel(false);
+              toast.danger('Could not cancel', error.message);
+            },
+          })
+        }
+      />
     </>
   );
 }

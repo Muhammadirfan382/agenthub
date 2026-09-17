@@ -12,7 +12,7 @@ def test_health_reports_backend_running(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "agenthub-backend",
-        "version": "0.3.0",
+        "version": "0.5.0",
         "message": "AgentHub backend is running.",
     }
 

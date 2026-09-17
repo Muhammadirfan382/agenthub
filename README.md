@@ -28,9 +28,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 2 | Backend: API, PostgreSQL, migrations | ✅ Complete |
 | 3 | Authentication and RBAC | ✅ Complete |
 | 4 | Agent registry: manifests, versions, marketplace, installs | ✅ Complete |
-| 5–10 | Runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
+| 5 | Agent runtime: orchestration, approvals, budgets, kill switch | ✅ Complete |
+| 6–10 | Sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–4):**
+**What exists today (Phases 0–5):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -44,14 +45,15 @@ aims to make that safe to do inside an organization by combining two things:
   - A uniform `{code, message, details}` error envelope, request ids, security headers, pagination and server-side validation and risk scoring.
   - Password sign-in, server-side sessions in HttpOnly cookies, CSRF protection, sign-in throttling, organizations with memberships, and four roles (viewer, member, admin, owner) enforced on every endpoint.
   - An agent registry: publishing freezes a manifest as an immutable version, visibility decides who sees it in the marketplace, and installing it into another organization grants only what that organization chooses - never more than the manifest asked for, and nothing by default.
-  - **No agent runtime**: requesting an execution records a queued row and nothing else, and nothing enforces a grant while nothing runs.
+  - An execution runtime that orchestrates runs: a durable queue and worker, per-run budgets for time, tokens and tool calls, pauses for human approval, cancellation, an organization-wide kill switch, and a recorded timeline, logs and tool calls streamed to the UI.
+  - **Nothing is executed.** No agent code runs, no model is called and no tool is invoked: the sandbox and the model gateway do not exist yet, so every run is marked `simulation` and its tool calls are recorded as `simulated`, never as succeeded.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
-email verification), an audit log, agent execution, sandboxing, LLM integration,
-real security scanning (the verification label is stored, not earned), monitoring
-and deployment.
+email verification), an audit log, actual agent execution, sandboxing, LLM
+integration, scheduled triggers, real security scanning (the verification label
+is stored, not earned), monitoring and deployment.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
 demonstration data.
@@ -183,6 +185,7 @@ AgentHub/
 │   ├── app/db/            Engine, session and ORM models
 │   ├── app/repositories/  Database queries
 │   ├── app/schemas/       Request/response models
+│   ├── app/runtime/       Execution plan, engine and worker (orchestration only)
 │   ├── app/services/      Business rules and risk scoring
 │   ├── scripts/           Account creation and demonstration seed scripts
 │   └── tests/             pytest suite
@@ -217,7 +220,7 @@ AgentHub/
 | 2 | Backend: API structure, PostgreSQL, migrations, error handling ✅ |
 | 3 | Authentication / RBAC: identity, sessions, roles, server-side authorization ✅ |
 | 4 | Agent registry: agent manifests, versions, permissions model, marketplace data ✅ |
-| 5 | Agent runtime: execution lifecycle, orchestration, approvals |
+| 5 | Agent runtime: execution lifecycle, orchestration, approvals ✅ |
 | 6 | Docker sandbox: isolated, resource-limited, credential-free execution |
 | 7 | AI/LLM integration: provider abstraction, model gateway, tool calling |
 | 8 | Security layer: policy engine, prompt-injection defences, secrets management, hardening |

@@ -15,7 +15,17 @@ describe('execution status rendering', () => {
         ))}
       </ul>,
     );
-    const labels = ['Queued', 'Starting', 'Running', 'Waiting for tool', 'Completed', 'Failed', 'Cancelled', 'Timed out'];
+    const labels = [
+      'Queued',
+      'Starting',
+      'Running',
+      'Waiting for tool',
+      'Waiting for approval',
+      'Completed',
+      'Failed',
+      'Cancelled',
+      'Timed out',
+    ];
     for (const label of labels) expect(screen.getByText(label)).toBeInTheDocument();
     expect(new Set(labels).size).toBe(EXECUTION_STATUSES.length);
   });

@@ -18,7 +18,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 API_V1_PREFIX = "/api/v1"
 SERVICE_NAME = "agenthub-backend"
-SERVICE_VERSION = "0.3.0"
+SERVICE_VERSION = "0.5.0"
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # scrypt work factor for new passwords (n = 2 ** exponent). Lowered only
     # in tests; production refuses anything weaker than the minimum.
     password_hash_cost_exponent: int = DEFAULT_COST_EXPONENT
+
+    # --- Runtime ------------------------------------------------------------
+    # Run the execution worker inside the API process. Turn it off to run
+    # `python -m app.runtime.worker` separately instead.
+    runtime_worker_enabled: bool = True
 
     # --- Login rate limiting (per process; see app/core/rate_limit.py) -------
     login_max_attempts: int = 5

@@ -58,6 +58,7 @@ const execution: Execution = {
   agentName: agent.name,
   status: 'QUEUED',
   trigger: 'manual',
+  runtime: 'simulation',
   startedAt: '2026-09-16T10:00:00Z',
   endedAt: null,
   durationMs: null,
@@ -65,6 +66,10 @@ const execution: Execution = {
   tokenUsage: { input: 0, output: 0 },
   toolCallCount: 0,
   resultSummary: null,
+  requestedBy: 'Admin Person',
+  budget: { maxRuntimeSeconds: 300, maxTokens: 50000, maxToolCalls: 20 },
+  cancelRequested: false,
+  pendingApprovals: 0,
 };
 
 const page = <T,>(items: T[]) => ({ items, total: items.length, limit: 200, offset: 0 });
@@ -187,6 +192,7 @@ describe('api mode services', () => {
       'members',
       'marketplace',
       'installations',
+      'runtime',
     ]);
   });
 

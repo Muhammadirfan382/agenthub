@@ -11,6 +11,10 @@ from app.db.models import (
     Agent,
     AgentVersion,
     Execution,
+    ExecutionApproval,
+    ExecutionEvent,
+    ExecutionLog,
+    ExecutionToolCall,
     Installation,
     Membership,
     Organization,
@@ -24,7 +28,7 @@ from app.schemas.auth import (
     SessionRead,
     UserRead,
 )
-from app.schemas.execution import ExecutionDetailRead, ExecutionRead
+from app.schemas.execution import ApprovalRead, ExecutionDetailRead, ExecutionRead
 from app.schemas.registry import (
     AgentVersionRead,
     InstallationDetail,
@@ -69,13 +73,14 @@ def to_agent_read(agent: Agent) -> AgentRead:
     )
 
 
-def _execution_payload(execution: Execution) -> dict[str, object]:
+def _execution_payload(execution: Execution, *, pending_approvals: int = 0) -> dict[str, object]:
     return {
         "id": execution.id,
         "agentId": execution.agent_id,
         "agentName": execution.agent_name,
         "status": execution.status,
         "trigger": execution.trigger,
+        "runtime": execution.runtime,
         "startedAt": ensure_utc(execution.started_at),
         "endedAt": ensure_utc(execution.ended_at) if execution.ended_at else None,
         "durationMs": execution.duration_ms,
@@ -83,16 +88,96 @@ def _execution_payload(execution: Execution) -> dict[str, object]:
         "tokenUsage": {"input": execution.token_input, "output": execution.token_output},
         "toolCallCount": execution.tool_call_count,
         "resultSummary": execution.result_summary,
+        "requestedBy": execution.requested_by_name,
+        "budget": {
+            "maxRuntimeSeconds": execution.max_runtime_seconds,
+            "maxTokens": execution.max_tokens,
+            "maxToolCalls": execution.max_tool_calls,
+        },
+        "cancelRequested": execution.cancel_requested_at is not None,
+        "pendingApprovals": pending_approvals,
     }
 
 
-def to_execution_read(execution: Execution) -> ExecutionRead:
-    return ExecutionRead.model_validate(_execution_payload(execution))
+def to_execution_read(execution: Execution, *, pending_approvals: int = 0) -> ExecutionRead:
+    return ExecutionRead.model_validate(
+        _execution_payload(execution, pending_approvals=pending_approvals)
+    )
 
 
-def to_execution_detail(execution: Execution) -> ExecutionDetailRead:
-    # Trace fields stay empty until the agent runtime records them.
-    return ExecutionDetailRead.model_validate(_execution_payload(execution))
+def to_approval_read(approval: ExecutionApproval, agent_name: str) -> ApprovalRead:
+    return ApprovalRead.model_validate(
+        {
+            "id": approval.id,
+            "executionId": approval.execution_id,
+            "agentName": agent_name,
+            "capability": approval.capability,
+            "tool": approval.tool,
+            "reason": approval.reason,
+            "riskLevel": approval.risk_level,
+            "status": approval.status,
+            "requestedAt": ensure_utc(approval.requested_at),
+            "decidedAt": ensure_utc(approval.decided_at) if approval.decided_at else None,
+            "decidedBy": approval.decided_by_name,
+            "note": approval.note,
+            "automatic": approval.automatic,
+        }
+    )
+
+
+def to_execution_detail(
+    execution: Execution,
+    *,
+    events: list[ExecutionEvent],
+    logs: list[ExecutionLog],
+    tool_calls: list[ExecutionToolCall],
+    approvals: list[ExecutionApproval],
+) -> ExecutionDetailRead:
+    pending = sum(1 for approval in approvals if approval.status == "pending")
+    payload = _execution_payload(execution, pending_approvals=pending)
+    payload["timeline"] = [
+        {
+            "id": event.id,
+            "at": ensure_utc(event.at),
+            "kind": event.kind,
+            "label": event.label,
+            "detail": event.detail,
+        }
+        for event in events
+    ]
+    payload["logs"] = [
+        {
+            "id": entry.id,
+            "at": ensure_utc(entry.at),
+            "level": entry.level,
+            "message": entry.message,
+        }
+        for entry in logs
+    ]
+    payload["toolCalls"] = [
+        {
+            "id": call.id,
+            "tool": call.tool,
+            "capability": call.capability,
+            "status": call.status,
+            "startedAt": ensure_utc(call.started_at),
+            "durationMs": call.duration_ms,
+            "inputSummary": call.input_summary,
+            "outputSummary": call.output_summary,
+        }
+        for call in tool_calls
+    ]
+    payload["approvals"] = [
+        to_approval_read(approval, execution.agent_name).model_dump(by_alias=True)
+        for approval in approvals
+    ]
+    payload["error"] = (
+        {"code": execution.error_code, "message": execution.error_message}
+        if execution.error_code
+        else None
+    )
+    payload["result"] = execution.result_summary
+    return ExecutionDetailRead.model_validate(payload)
 
 
 def to_user_read(user: User) -> UserRead:

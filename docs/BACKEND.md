@@ -2,11 +2,12 @@
 
 FastAPI service for agents and executions, backed by SQLAlchemy and Alembic.
 
-**Status (Phase 4).** Persists organizations, users, memberships, sessions,
-agents, published versions, marketplace listings, installations and executions. Every endpoint except the health check and sign-in
-requires a session, and every action is checked against a role. There is still
-**no agent runtime**: requesting an execution records a queued row and nothing
-runs. Treat it as pre-release software — it has never been deployed, audited or
+**Status (Phase 5).** Persists organizations, users, memberships, sessions,
+agents, published versions, marketplace listings, installations, executions and
+everything a run records. Every endpoint except the health check and sign-in
+requires a session, and every action is checked against a role. A runtime now orchestrates
+executions, but **executes nothing**: no sandbox exists yet, so no agent code,
+model or tool is actually run (see §6). Treat it as pre-release software — it has never been deployed, audited or
 run against real data.
 
 ---
@@ -24,6 +25,7 @@ backend/
 │   ├── db/                 base metadata, engine/session, models/
 │   ├── repositories/       Queries (no business rules)
 │   ├── schemas/            Pydantic request/response models and enums
+│   ├── runtime/            Plan, engine and worker (orchestration only)
 │   ├── services/           Business rules, authorization matrix, risk scoring
 │   └── main.py             create_app() application factory
 ├── scripts/create_user.py  Creates an account; there is no public sign-up
@@ -53,6 +55,7 @@ default.
 | `LOGIN_MAX_ATTEMPTS_PER_IP` | `20` | Failed sign-ins per client address per window. |
 | `LOGIN_WINDOW_MINUTES` | `15` | The window both limits use. |
 | `PASSWORD_HASH_COST_EXPONENT` | `15` | scrypt work factor (n = 2^exponent). Production refuses below 14. |
+| `RUNTIME_WORKER_ENABLED` | `true` | Run the execution worker inside the API process. Turn off when running `python -m app.runtime.worker` separately. |
 
 Passwords are masked (`safe_database_url`) before the URL is ever logged.
 
@@ -98,7 +101,13 @@ stays snake_case (`CamelModel` generates the aliases).
 | `PATCH` | `/installations/{id}` | admin | Change grants, suspend or resume. |
 | `DELETE` | `/installations/{id}` | admin | Uninstall. |
 | `GET` | `/executions` | viewer | `status`, `agentId`, `search`, `limit`, `offset`. |
-| `GET` | `/executions/{id}` | viewer | Timeline, logs and tool calls are empty until a runtime records them. |
+| `GET` | `/executions/{id}` | viewer | The run with everything it recorded: timeline, logs, tool calls, approvals. |
+| `POST` | `/executions/{id}/cancel` | owner of the agent, or admin | 202. The runtime stops at the next step boundary. |
+| `GET` | `/executions/approvals` | viewer | Approvals waiting on a person. |
+| `POST` | `/executions/{id}/approvals/{approvalId}` | owner of the agent, or admin | `approved` or `denied`, with an optional note. |
+| `GET` | `/executions/{id}/stream` | viewer | Server-sent events while the run is live. |
+| `GET` | `/organization/runtime` | viewer | Kill-switch state and how many approvals are waiting. |
+| `PATCH` | `/organization/runtime` | admin to engage, owner to release | The organization-wide stop. |
 
 **Collections** answer with `{items, total, limit, offset}`; `limit` defaults to 50
 and is capped at 200.
@@ -219,7 +228,68 @@ once; changing your mind means updating the installation, which re-runs the same
 validation. `updateAvailable` says whether the publisher has released a newer
 version - upgrading is a deliberate act, because a new manifest may ask for more.
 
-## 6. Domain rules
+## 6. The runtime
+
+**It orchestrates; it does not execute.** There is no sandbox (Phase 6) and no
+model gateway (Phase 7), so no agent code runs, no model is called and no tool
+is invoked. Every run records `runtime = "simulation"`, every simulated step
+says so in its own text, and tool calls are recorded as `simulated` — never as
+`succeeded`. Nothing in the database can be mistaken for work that happened.
+
+What *is* real is everything around the work: the state machine, the budget,
+the approval pauses, cancellation, the kill switch, and the record.
+
+**The plan** (`app/runtime/plan.py`) comes from the agent's own declaration:
+prepare, think, one step per declared tool, finish. It is not a model deciding
+what to do — that arrives with Phase 7.
+
+**The engine** (`app/runtime/engine.py`) walks one step at a time, writing
+progress after each. Before every step it checks, in order: the kill switch,
+cancellation, then the budget. A tool step is refused outright when its
+capability is denied, pauses when the agent requires human approval, and is
+otherwise recorded as simulated.
+
+**The worker** (`app/runtime/worker.py`) claims runs with a conditional UPDATE,
+so two workers racing for the same run cannot both win. It heartbeats while it
+works; a run whose worker stopped heartbeating for 60 seconds is reclaimed and
+continues from the step it reached, because `step_index` is in the database
+rather than in memory. It runs inside the API process by default
+(`RUNTIME_WORKER_ENABLED`), or separately with
+`python -m app.runtime.worker`.
+
+**States**
+
+```
+QUEUED -> STARTING -> RUNNING -> COMPLETED
+                         |  \-> WAITING_FOR_APPROVAL -> RUNNING
+                         |
+                         +-> FAILED | TIMEOUT | CANCELLED
+```
+
+**Budgets** are copied onto the run when it is requested — runtime seconds,
+tokens and tool calls — so editing the agent mid-run cannot move the limits the
+run is being held to. Passing them ends the run as `TIMEOUT` (time) or `FAILED`
+(tokens, tool calls) with an error code saying which.
+
+**Approvals.** A tool step whose permission says `requiresApproval` creates a
+pending approval and parks the run in `WAITING_FOR_APPROVAL`; nothing is
+recorded as done while it waits. Deciding it needs the same permission as
+running the agent. Refusal is not a failure: the refusal is recorded, the step
+is skipped, and the run continues.
+
+**Cancellation** is a request, not a kill: the engine stops at the next step
+boundary, so a run never ends mid-step with a half-written record.
+
+**The kill switch** is organization-wide. Engaging it refuses new runs and asks
+every live run to stop; any administrator can engage it, and only the owner can
+release it. Turning protection back on should be easier than turning it off.
+
+**Watching a run.** `GET /executions/{id}/stream` is a server-sent event stream
+of status changes and new timeline entries. It is an optimisation: the UI also
+polls while a run is live, so a browser without `EventSource`, or a proxy that
+buffers the stream, still sees progress.
+
+## 7. Domain rules
 
 The backend is authoritative; the frontend's Zod rules only improve the form.
 
@@ -234,8 +304,12 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   verification is not `rejected`.
 - Executions can only be requested for an `active` agent.
 
-## 7. Database
+## 8. Database
 
+- **Runtime tables:** `execution_events`, `execution_logs`,
+  `execution_tool_calls` and `execution_approvals`, all cascading from the
+  execution. `executions` also carries the budget it was given, the worker
+  claim, the heartbeat and any error.
 - **Registry tables:** `agent_versions` (immutable manifests) and
   `installations` (one row per organization per installed agent, holding the
   grants). Both are organization-scoped like everything else.
@@ -284,7 +358,7 @@ cd backend
 Four fictional agents and three execution records, safe to run twice. The
 execution rows are records of requests, not evidence that anything ran.
 
-## 8. Testing
+## 9. Testing
 
 ```powershell
 cd backend
@@ -303,6 +377,13 @@ revocation, CSRF rejection, the role matrix, ownership rules, membership rules,
 cross-organization isolation, and a deny-by-default check that walks the OpenAPI
 schema and asserts every route refuses an unauthenticated caller.
 
+The runtime is driven directly rather than through the background loop, so the
+tests assert behaviour instead of timing: a run walks to completion and records
+its trace, each budget ends it with the right status, an approval pauses it and
+approving or refusing continues it, cancellation stops it at the next step, the
+kill switch blocks and stops runs, two workers cannot claim the same run, and an
+abandoned run is reclaimed.
+
 The registry adds its own: that a published manifest does not change when the
 agent is edited, that private agents are never listed, that only the newest
 published version appears, that a grant cannot exceed or weaken what the
@@ -310,9 +391,12 @@ manifest asked for, that installing grants nothing by default, and that
 installations never cross organizations. PostgreSQL is covered in CI by applying,
 rolling back and reapplying the migrations against a real server.
 
-## 9. Security status
+## 10. Security status
 
-Implemented: immutable published manifests, deny-by-default permission grants
+Implemented: an orchestrator that executes nothing, budgets enforced per run,
+human approval before a declared capability is used, cancellation and an
+organization-wide kill switch, immutable published manifests, deny-by-default
+permission grants
 that can never exceed what a manifest requested, password authentication with
 scrypt, revocable server-side sessions
 in HttpOnly cookies, CSRF protection on every state-changing request, sign-in
@@ -326,8 +410,9 @@ throughout.
 **Not implemented yet:** MFA and SSO (password sign-in is the only method), email
 delivery and therefore password reset and email verification, an audit log, CORS
 configuration for a separate frontend origin, shared-store rate limiting for
-multiple workers, agent execution and sandboxing (Phases 5-6), and real security
-scanning (Phase 8). Nothing enforces a grant at runtime yet, because nothing
-runs: grants are recorded configuration until the runtime exists. Verification
-is a stored label, not the result of a review anyone performed. Nothing here has been penetration-tested or reviewed by
+multiple workers, agent execution and sandboxing (Phase 6), a real model
+(Phase 7) and real security scanning (Phase 8). Grants and policies are checked
+when the runtime plans a step, but nothing enforces them against real code
+because no real code runs. Verification is a stored label, not the result of a
+review anyone performed. Nothing here has been penetration-tested or reviewed by
 anyone outside this repository.

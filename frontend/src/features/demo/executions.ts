@@ -54,6 +54,7 @@ function toExecution(seed: Seed): Execution {
     agentName: seed.agentName,
     status: seed.status,
     trigger: seed.trigger ?? 'manual',
+    runtime: 'simulation',
     startedAt,
     endedAt: seed.durationMs === null ? null : addMs(startedAt, seed.durationMs),
     durationMs: seed.durationMs,
@@ -61,6 +62,10 @@ function toExecution(seed: Seed): Execution {
     tokenUsage: { input: seed.tokens[0], output: seed.tokens[1] },
     toolCallCount: seed.tools.length,
     resultSummary: seed.result,
+    requestedBy: 'Demo User',
+    budget: { maxRuntimeSeconds: 900, maxTokens: 120000, maxToolCalls: 40 },
+    cancelRequested: false,
+    pendingApprovals: 0,
   };
 }
 
@@ -99,15 +104,21 @@ export function buildDemoExecutionDetail(execution: Execution): ExecutionDetail 
       const isLast = index === tools.length - 1;
       const callAt = at(3000 + index * 1500);
       const toolStatus: ToolCall['status'] =
-        isLast && status === 'FAILED' ? 'failed' : isLast && status === 'WAITING_FOR_TOOL' ? 'pending' : 'succeeded';
+        isLast && status === 'FAILED' ? 'failed' : isLast && status === 'WAITING_FOR_TOOL' ? 'pending' : 'simulated';
       toolCalls.push({
         id: `tc_${index + 1}`,
         tool,
+        capability: 'tool_calling',
         status: toolStatus,
         startedAt: callAt,
         durationMs: toolStatus === 'pending' ? null : 800 + index * 450,
         inputSummary: `Arguments validated against the ${tool} schema (demo).`,
-        outputSummary: toolStatus === 'succeeded' ? 'Result returned to the agent (demo).' : toolStatus === 'failed' ? 'Upstream service returned HTTP 503 (demo).' : null,
+        outputSummary:
+          toolStatus === 'simulated'
+            ? 'Simulated: no tool was invoked (demo).'
+            : toolStatus === 'failed'
+              ? 'Upstream service returned HTTP 503 (demo).'
+              : null,
       });
       timeline.push({
         id: `tl_tool_${index + 1}`,
@@ -119,7 +130,10 @@ export function buildDemoExecutionDetail(execution: Execution): ExecutionDetail 
         id: `log_tool_${index + 1}`,
         at: callAt,
         level: toolStatus === 'failed' ? 'error' : 'info',
-        message: toolStatus === 'failed' ? `${tool} failed: upstream unavailable.` : `${tool} ${toolStatus === 'pending' ? 'in progress' : 'completed'}.`,
+        message:
+          toolStatus === 'failed'
+            ? `${tool} failed: upstream unavailable.`
+            : `${tool} ${toolStatus === 'pending' ? 'in progress' : 'recorded as simulated'}.`,
       });
     });
   }
@@ -138,6 +152,7 @@ export function buildDemoExecutionDetail(execution: Execution): ExecutionDetail 
 
   return {
     ...execution,
+    approvals: [],
     timeline,
     logs,
     toolCalls,

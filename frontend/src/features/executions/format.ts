@@ -18,6 +18,8 @@ export function executionResultText(execution: Execution): string {
     case 'RUNNING':
     case 'WAITING_FOR_TOOL':
       return 'In progress';
+    case 'WAITING_FOR_APPROVAL':
+      return 'Waiting for approval';
   }
 }
 

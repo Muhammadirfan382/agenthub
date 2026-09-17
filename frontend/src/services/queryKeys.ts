@@ -26,6 +26,11 @@ export const queryKeys = {
     all: ['executions'] as const,
     list: (params: ExecutionListParams) => ['executions', 'list', params] as const,
     detail: (id: string) => ['executions', 'detail', id] as const,
+    approvals: ['executions', 'approvals'] as const,
+  },
+  runtime: {
+    all: ['runtime'] as const,
+    state: ['runtime', 'state'] as const,
   },
   security: {
     overview: ['security', 'overview'] as const,

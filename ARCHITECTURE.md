@@ -98,6 +98,11 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
   allow-lists, status transitions and risk scores are decided by the backend.
   Requesting an execution records a queued row; nothing runs.
 - API docs (`/api/docs`, `/api/openapi.json`) only when `ENVIRONMENT=development`.
+- Agent runtime (Phase 5): a database-backed queue and worker that walks each
+  run step by step, enforces the budget it was given, pauses for human approval,
+  honours cancellation and an organization-wide kill switch, and records a
+  timeline, logs and tool calls. It **executes nothing**: no sandbox exists, so
+  every run is marked `simulation`.
 - Agent registry (Phase 4): immutable published manifests, marketplace
   listings governed by a visibility setting, and installations that record what
   an organization granted - never more than the manifest requested, and nothing
@@ -128,8 +133,9 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 ### Current implementation
 
 - `organizations`, `users`, `memberships`, `sessions`, `agents`,
-  `agent_versions`, `installations` and `executions` tables, created by Alembic
-  migrations in `database/migrations/versions/`.
+  `agent_versions`, `installations`, `executions`, `execution_events`,
+  `execution_logs`, `execution_tool_calls` and `execution_approvals` tables,
+  created by Alembic migrations in `database/migrations/versions/`.
 - Passwords are scrypt hashes; session and CSRF tokens are stored only as
   SHA-256 fingerprints. Sessions record no IP address or user agent.
 - Configuration documents (model, tools, permissions, limits, policy, versions,

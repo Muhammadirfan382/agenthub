@@ -34,11 +34,21 @@ ExecutionStatus = Literal[
     "STARTING",
     "RUNNING",
     "WAITING_FOR_TOOL",
+    "WAITING_FOR_APPROVAL",
     "COMPLETED",
     "FAILED",
     "CANCELLED",
     "TIMEOUT",
 ]
+# What produced a run. Nothing but `simulation` exists yet: there is no sandbox
+# (Phase 6) and no model gateway (Phase 7), so no agent code is executed.
+ExecutionRuntime = Literal["simulation"]
+TimelineKind = Literal["lifecycle", "model", "tool", "policy", "error", "result"]
+LogLevel = Literal["debug", "info", "warn", "error"]
+#: A tool call is never "succeeded" while the runtime is a simulation.
+ToolCallStatus = Literal["pending", "simulated", "denied", "failed"]
+ApprovalStatus = Literal["pending", "approved", "denied"]
+ApprovalDecision = Literal["approved", "denied"]
 ExecutionTrigger = Literal["manual", "schedule", "api"]
 AgentSort = Literal["updated_desc", "name_asc", "risk_desc", "last_execution_desc"]
 
@@ -49,6 +59,10 @@ UserStatus = Literal["active", "disabled"]
 RISK_LEVELS: tuple[RiskLevel, ...] = get_args(RiskLevel)
 CAPABILITY_KEYS: tuple[CapabilityKey, ...] = get_args(CapabilityKey)
 EXECUTION_STATUSES: tuple[ExecutionStatus, ...] = get_args(ExecutionStatus)
+#: Statuses a run can never leave.
+TERMINAL_STATUSES: frozenset[str] = frozenset({"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"})
+#: Statuses a worker may pick up and continue.
+RUNNABLE_STATUSES: frozenset[str] = frozenset({"QUEUED", "STARTING", "RUNNING", "WAITING_FOR_TOOL"})
 PERMISSION_LEVELS: tuple[PermissionLevel, ...] = get_args(PermissionLevel)
 LEVEL_RANK: dict[str, int] = {level: index for index, level in enumerate(PERMISSION_LEVELS)}
 

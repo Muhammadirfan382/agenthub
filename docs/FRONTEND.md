@@ -139,6 +139,23 @@ authorization control.
   A 404 on a detail request becomes `null`; other failures raise `ApiError`
   carrying the backend's own `code` and `message`.
 
+### Watching and controlling a run (Phase 5)
+
+- **Live updates:** `useExecutionStream` subscribes to the server's event
+  stream while a run is unfinished, and every execution view also polls on a
+  short interval in API mode. The stream is the fast path, the poll is the
+  guarantee. Demo mode never polls: nothing changes behind the app's back.
+- **Approvals:** `ApprovalPanel` shows what a run is waiting for and lets
+  someone with the run permission approve or refuse it, with a note. Refusing
+  is presented as a normal outcome, because it is one.
+- **Cancelling** asks the runtime to stop at the next step, and the page says
+  "Stopping" until it does.
+- **The kill switch** lives in Settings → Runtime, and `RuntimeBanner` repeats
+  the state anywhere executions are listed, so nobody wonders why nothing is
+  starting.
+- **Honesty:** the execution page states that the runtime executed nothing, and
+  tool calls are labelled *Simulated*, never *Succeeded*.
+
 ### The registry (Phase 4)
 
 - **Marketplace** (`features/marketplace`): listings come from the API, one per
@@ -186,8 +203,8 @@ user can switch it in **Settings → API**; the choice is persisted per browser 
 cache, so demo rows can never be displayed as backend data.
 
 In API mode the backend serves identity (sessions, members), agents, versions,
-marketplace listings, installations, executions and the dashboard counts derived
-from them. Marketplace, security, analytics and the profile still come from demo
+marketplace listings, installations, executions and their recorded traces, the
+runtime controls, and the dashboard counts derived from them. Marketplace, security, analytics and the profile still come from demo
 data. `services.liveResources` states exactly which resources are real, and
 `useIsLive(resource)` drives the `DataNotice` on each page, so no page can keep
 claiming "demonstration data" while reading from the backend.

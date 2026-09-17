@@ -14,6 +14,7 @@ import { Select } from '@/components/ui/Select';
 import { formatDateTime, formatDuration, formatNumber } from '@/lib/format';
 import { EXECUTION_STATUSES, type Execution, type ExecutionStatus } from '@/types/domain';
 import { useExecutions } from './api';
+import { RuntimeBanner } from './components/RuntimeBanner';
 import { executionResultText, totalTokens } from './format';
 
 const columns: Column<Execution>[] = [
@@ -56,11 +57,13 @@ export default function ExecutionsPage() {
     <>
       <PageHeader title="Executions" description="Monitor agent runs: status, duration, model usage, tool calls and outcomes." />
 
+      <RuntimeBanner className="mb-4" />
+
       <DataNotice
         resource="executions"
         className="mb-6"
         demo="Executions are demonstration data and are not updated in real time. Real execution monitoring arrives with the agent runtime."
-        live="Executions are records stored by the backend. Nothing runs yet, so a requested execution stays queued until the agent runtime exists."
+        live="The runtime walks each run, holds it to its budget and records every step — but executes nothing: no sandbox exists yet, so no agent code, model or tool is actually run."
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">

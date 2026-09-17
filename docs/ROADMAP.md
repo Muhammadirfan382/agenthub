@@ -12,7 +12,7 @@ designed in detail when it begins.
 | 2 | Backend | ✅ Complete (agents and executions persisted; no auth) |
 | 3 | Authentication / RBAC | ✅ Complete (password sign-in, sessions, roles) |
 | 4 | Agent registry | ✅ Complete (manifests, versions, marketplace, installs) |
-| 5 | Agent runtime | ⏳ Not started |
+| 5 | Agent runtime | ✅ Complete (orchestration only; nothing is executed) |
 | 6 | Docker sandbox | ⏳ Not started |
 | 7 | AI/LLM integration | ⏳ Not started |
 | 8 | Security layer | ⏳ Not started |
@@ -113,6 +113,19 @@ the host.
 - Human approval pause/resume for high-risk actions.
 - Budgets, cancellation, organization-wide kill switch.
 - Execution events and streaming status to the frontend.
+
+**Delivered:** a database-backed queue with claim, heartbeat and reclaim; a step
+engine that records a timeline, logs and tool calls; per-run budgets for time,
+tokens and tool calls; approval pauses with approve/refuse and a note;
+cancellation at the next step boundary; an organization-wide kill switch that
+administrators engage and only owners release; and a server-sent event stream
+with polling behind it. See [BACKEND.md](BACKEND.md) §6.
+
+**Deliberately not in this phase:** running anything. No agent code, model call
+or tool invocation happens — the sandbox is Phase 6 and the model gateway is
+Phase 7 — so every run is recorded as `simulation` and tool calls as
+`simulated`. Also absent: scheduled triggers, retries of failed runs, and
+per-organization concurrency limits.
 
 ## Phase 6: Docker sandbox
 

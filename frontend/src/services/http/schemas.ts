@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import type { Agent, AgentPermission, Execution, ExecutionDetail } from '@/types/domain';
+import type {
+  Agent,
+  AgentPermission,
+  Approval,
+  Execution,
+  ExecutionDetail,
+  RuntimeState,
+} from '@/types/domain';
 
 /**
  * Response schemas for the AgentHub API.
@@ -31,12 +38,13 @@ const executionStatus = z.enum([
   'STARTING',
   'RUNNING',
   'WAITING_FOR_TOOL',
+  'WAITING_FOR_APPROVAL',
   'COMPLETED',
   'FAILED',
   'CANCELLED',
   'TIMEOUT',
 ]);
-const trigger = z.enum(['manual', 'schedule', 'api']);
+const approvalStatus = z.enum(['pending', 'approved', 'denied']);
 
 const person = z.object({ id, name: z.string() });
 
@@ -96,27 +104,22 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   ),
 });
 
-export const ExecutionSchema: z.ZodType<Execution> = z.object({
-  id,
-  agentId: id,
-  agentName: z.string(),
-  status: executionStatus,
-  trigger,
-  startedAt: iso,
-  endedAt: iso.nullable(),
-  durationMs: z.number().nullable(),
-  model: z.string(),
-  tokenUsage: z.object({ input: z.number(), output: z.number() }),
-  toolCallCount: z.number(),
-  resultSummary: z.string().nullable(),
+const trigger = z.enum(['manual', 'schedule', 'api']);
+
+const budget = z.object({
+  maxRuntimeSeconds: z.number(),
+  maxTokens: z.number(),
+  maxToolCalls: z.number(),
 });
 
-export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
+/** Fields every execution carries, detail or not. */
+const executionShape = {
   id,
   agentId: id,
   agentName: z.string(),
   status: executionStatus,
   trigger,
+  runtime: z.literal('simulation'),
   startedAt: iso,
   endedAt: iso.nullable(),
   durationMs: z.number().nullable(),
@@ -124,6 +127,40 @@ export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
   tokenUsage: z.object({ input: z.number(), output: z.number() }),
   toolCallCount: z.number(),
   resultSummary: z.string().nullable(),
+  requestedBy: z.string(),
+  budget,
+  cancelRequested: z.boolean(),
+  pendingApprovals: z.number(),
+};
+
+export const ApprovalSchema: z.ZodType<Approval> = z.object({
+  id,
+  executionId: id,
+  agentName: z.string(),
+  capability: z.string(),
+  tool: z.string().nullable(),
+  reason: z.string(),
+  riskLevel,
+  status: approvalStatus,
+  requestedAt: iso,
+  decidedAt: iso.nullable(),
+  decidedBy: z.string().nullable(),
+  note: z.string().nullable(),
+  automatic: z.boolean(),
+});
+
+export const RuntimeStateSchema: z.ZodType<RuntimeState> = z.object({
+  executionsPaused: z.boolean(),
+  pausedAt: iso.nullable(),
+  pausedBy: z.string().nullable(),
+  reason: z.string().nullable(),
+  pendingApprovals: z.number(),
+});
+export const ExecutionSchema: z.ZodType<Execution> = z.object(executionShape);
+
+export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
+  ...executionShape,
+  approvals: z.array(ApprovalSchema),
   timeline: z.array(
     z.object({
       id,
@@ -145,7 +182,8 @@ export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
     z.object({
       id,
       tool: z.string(),
-      status: z.enum(['succeeded', 'failed', 'denied', 'pending']),
+      capability: z.string(),
+      status: z.enum(['pending', 'simulated', 'denied', 'failed']),
       startedAt: iso,
       durationMs: z.number().nullable(),
       inputSummary: z.string(),

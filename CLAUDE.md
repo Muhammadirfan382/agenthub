@@ -146,6 +146,9 @@ python -m venv .venv
 # Create a real account (prompts for the password; never pass it as an argument):
 .\.venv\Scripts\python.exe -m scripts.create_user --email you@example.com --name "Your Name" --organization "Your Workspace" --role owner
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+# The execution worker runs inside the API by default. To run it separately,
+# set RUNTIME_WORKER_ENABLED=false for the API and start:
+.\.venv\Scripts\python.exe -m app.runtime.worker
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format --check .
 .\.venv\Scripts\python.exe -m mypy

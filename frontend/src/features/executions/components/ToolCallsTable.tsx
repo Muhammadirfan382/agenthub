@@ -6,7 +6,8 @@ import { formatDuration, formatTime } from '@/lib/format';
 import type { ToolCall, ToolCallStatus } from '@/types/domain';
 
 const STATUS: Record<ToolCallStatus, { label: string; tone: BadgeTone }> = {
-  succeeded: { label: 'Succeeded', tone: 'success' },
+  // Nothing was executed: the runtime recorded the request instead.
+  simulated: { label: 'Simulated', tone: 'info' },
   failed: { label: 'Failed', tone: 'danger' },
   denied: { label: 'Denied by policy', tone: 'high' },
   pending: { label: 'Pending', tone: 'warning' },

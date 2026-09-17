@@ -18,6 +18,8 @@ export type PermissionAction =
   | 'execution:read'
   | 'installation:read'
   | 'installation:manage'
+  | 'runtime:pause'
+  | 'runtime:resume'
   | 'member:read'
   | 'member:manage'
   | 'organization:manage';
@@ -36,6 +38,10 @@ const MINIMUM_ROLE: Record<PermissionAction, Role> = {
   'agent:publish': 'admin',
   'member:manage': 'admin',
   'installation:manage': 'admin',
+  // Stopping everything is an emergency any administrator can trigger;
+  // releasing it again is the owner's call.
+  'runtime:pause': 'admin',
+  'runtime:resume': 'owner',
   'organization:manage': 'owner',
 };
 

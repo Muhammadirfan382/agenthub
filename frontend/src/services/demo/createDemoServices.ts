@@ -19,6 +19,7 @@ import type {
   AnalyticsService,
   AuthService,
   ExecutionService,
+  RuntimeService,
   InstallationPatch,
   InstallationService,
   InstallInput,
@@ -39,8 +40,11 @@ import type {
   ExecutionStatus,
   Installation,
   InstallationDetail,
+  Approval,
+  ApprovalDecision,
   Member,
   MarketplaceListing,
+  RuntimeState,
   MarketplaceListingDetail,
   PermissionOverviewRow,
   RiskLevel,
@@ -221,6 +225,7 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
         agentName: agent.name,
         status: 'QUEUED',
         trigger: 'manual',
+        runtime: 'simulation',
         startedAt: new Date().toISOString(),
         endedAt: null,
         durationMs: null,
@@ -228,6 +233,14 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
         tokenUsage: { input: 0, output: 0 },
         toolCallCount: 0,
         resultSummary: null,
+        requestedBy: user.name,
+        budget: {
+          maxRuntimeSeconds: agent.resourceLimits.maxRuntimeSeconds,
+          maxTokens: agent.resourceLimits.maxTokensPerRun,
+          maxToolCalls: agent.resourceLimits.maxToolCalls,
+        },
+        cancelRequested: false,
+        pendingApprovals: 0,
       };
       executions.unshift(execution);
       return respond(execution);
@@ -402,6 +415,21 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     },
   };
 
+  let runtimeState: RuntimeState = {
+    executionsPaused: false,
+    pausedAt: null,
+    pausedBy: null,
+    reason: null,
+    pendingApprovals: 0,
+  };
+
+  const approvals: Approval[] = [];
+
+  const detailOfExecution = (execution: Execution) => ({
+    ...buildDemoExecutionDetail(execution),
+    approvals: approvals.filter((approval) => approval.executionId === execution.id),
+  });
+
   const executionService: ExecutionService = {
     list(params = {}) {
       const search = params.search?.trim().toLowerCase() ?? '';
@@ -414,7 +442,59 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     },
     get(id) {
       const execution = executions.find((e) => e.id === id);
-      return respond(execution ? buildDemoExecutionDetail(execution) : null);
+      return respond(execution ? detailOfExecution(execution) : null);
+    },
+
+    cancel(id) {
+      const execution = executions.find((e) => e.id === id);
+      if (!execution) return fail('This execution no longer exists.');
+      if (['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT'].includes(execution.status)) {
+        return fail('This execution already finished.');
+      }
+      execution.cancelRequested = true;
+      execution.status = 'CANCELLED';
+      execution.endedAt = new Date().toISOString();
+      return respond(detailOfExecution(execution));
+    },
+
+    pendingApprovals() {
+      return respond(approvals.filter((approval) => approval.status === 'pending'));
+    },
+
+    decideApproval(executionId, approvalId, decision: ApprovalDecision, note) {
+      const approval = approvals.find((entry) => entry.id === approvalId);
+      const execution = executions.find((e) => e.id === executionId);
+      if (!approval || !execution) return fail('This approval request no longer exists.');
+      if (approval.status !== 'pending') return fail(`This request was already ${approval.status}.`);
+
+      approval.status = decision;
+      approval.decidedAt = new Date().toISOString();
+      approval.decidedBy = user.name;
+      approval.note = note ?? null;
+      execution.pendingApprovals = approvals.filter(
+        (entry) => entry.executionId === execution.id && entry.status === 'pending',
+      ).length;
+      execution.status = decision === 'approved' ? 'RUNNING' : 'COMPLETED';
+      return respond(detailOfExecution(execution));
+    },
+  };
+
+  const runtimeService: RuntimeService = {
+    state() {
+      return respond({
+        ...runtimeState,
+        pendingApprovals: approvals.filter((approval) => approval.status === 'pending').length,
+      });
+    },
+    setExecutionsPaused(paused: boolean, reason?: string) {
+      runtimeState = {
+        ...runtimeState,
+        executionsPaused: paused,
+        pausedAt: paused ? new Date().toISOString() : null,
+        pausedBy: paused ? user.name : null,
+        reason: paused ? (reason ?? null) : null,
+      };
+      return respond(runtimeState);
     },
   };
 
@@ -577,5 +657,6 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     auth: authService,
     members: memberService,
     installations: installationService,
+    runtime: runtimeService,
   };
 }

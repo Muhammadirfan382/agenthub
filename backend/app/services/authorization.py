@@ -22,6 +22,8 @@ Action = Literal[
     "execution:read",
     "installation:read",
     "installation:manage",
+    "runtime:pause",
+    "runtime:resume",
     "member:read",
     "member:manage",
     "organization:manage",
@@ -42,6 +44,10 @@ MINIMUM_ROLE: dict[Action, Role] = {
     # Installing grants another organization's agent access to this one's work,
     # so it stays with administrators even though reading is open to everyone.
     "installation:manage": "admin",
+    # Stopping everything is an emergency any administrator can trigger;
+    # turning protection back off is the owner's call.
+    "runtime:pause": "admin",
+    "runtime:resume": "owner",
     "organization:manage": "owner",
 }
 
@@ -58,6 +64,8 @@ _MESSAGES: dict[Action, str] = {
     "agent:publish": "You can only publish agents you own.",
     "member:manage": "Only administrators and owners can manage members.",
     "installation:manage": "Only administrators and owners can install or change agents.",
+    "runtime:pause": "Only administrators and owners can stop executions.",
+    "runtime:resume": "Only the organization owner can release the kill switch.",
     "organization:manage": "Only the organization owner can do this.",
 }
 

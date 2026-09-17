@@ -4,7 +4,7 @@ import { afterEach, vi } from 'vitest';
 
 // Route modules are lazy-loaded; the first import in jsdom can be slow, and
 // slower still when every test file runs in its own worker.
-configure({ asyncUtilTimeout: 10000 });
+configure({ asyncUtilTimeout: 15000 });
 import { useDataSourceStore } from '@/stores/dataSourceStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useUiStore } from '@/stores/uiStore';

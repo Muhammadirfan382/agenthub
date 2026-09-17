@@ -225,6 +225,7 @@ export type ExecutionStatus =
   | 'STARTING'
   | 'RUNNING'
   | 'WAITING_FOR_TOOL'
+  | 'WAITING_FOR_APPROVAL'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED'
@@ -235,11 +236,36 @@ export const EXECUTION_STATUSES: readonly ExecutionStatus[] = [
   'STARTING',
   'RUNNING',
   'WAITING_FOR_TOOL',
+  'WAITING_FOR_APPROVAL',
   'COMPLETED',
   'FAILED',
   'CANCELLED',
   'TIMEOUT',
 ];
+
+/** Statuses a run can never leave. */
+export const TERMINAL_EXECUTION_STATUSES: readonly ExecutionStatus[] = [
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+  'TIMEOUT',
+];
+
+export function isExecutionFinished(status: ExecutionStatus): boolean {
+  return TERMINAL_EXECUTION_STATUSES.includes(status);
+}
+
+/**
+ * What produced a run. Only `simulation` exists: there is no sandbox and no
+ * model gateway yet, so no agent code is executed.
+ */
+export type ExecutionRuntime = 'simulation';
+
+export interface ExecutionBudget {
+  maxRuntimeSeconds: number;
+  maxTokens: number;
+  maxToolCalls: number;
+}
 
 export interface TokenUsage {
   input: number;
@@ -252,6 +278,7 @@ export interface Execution {
   agentName: string;
   status: ExecutionStatus;
   trigger: 'manual' | 'schedule' | 'api';
+  runtime: ExecutionRuntime;
   startedAt: ISODate;
   endedAt: ISODate | null;
   durationMs: number | null;
@@ -259,6 +286,10 @@ export interface Execution {
   tokenUsage: TokenUsage;
   toolCallCount: number;
   resultSummary: string | null;
+  requestedBy: string;
+  budget: ExecutionBudget;
+  cancelRequested: boolean;
+  pendingApprovals: number;
 }
 
 export type TimelineEventKind = 'lifecycle' | 'model' | 'tool' | 'policy' | 'error' | 'result';
@@ -280,16 +311,47 @@ export interface LogEntry {
   message: string;
 }
 
-export type ToolCallStatus = 'succeeded' | 'failed' | 'denied' | 'pending';
+/** Never "succeeded" while the runtime is a simulation: nothing ran. */
+export type ToolCallStatus = 'pending' | 'simulated' | 'denied' | 'failed';
 
 export interface ToolCall {
   id: ID;
   tool: string;
+  capability: string;
   status: ToolCallStatus;
   startedAt: ISODate;
   durationMs: number | null;
   inputSummary: string;
   outputSummary: string | null;
+}
+
+export type ApprovalStatus = 'pending' | 'approved' | 'denied';
+export type ApprovalDecision = 'approved' | 'denied';
+
+/** A paused step: somebody has to decide before the run continues. */
+export interface Approval {
+  id: ID;
+  executionId: ID;
+  agentName: string;
+  capability: string;
+  tool: string | null;
+  reason: string;
+  riskLevel: RiskLevel;
+  status: ApprovalStatus;
+  requestedAt: ISODate;
+  decidedAt: ISODate | null;
+  decidedBy: string | null;
+  note: string | null;
+  automatic: boolean;
+}
+
+/** The organization-wide stop control. */
+export interface RuntimeState {
+  executionsPaused: boolean;
+  pausedAt: ISODate | null;
+  pausedBy: string | null;
+  reason: string | null;
+  pendingApprovals: number;
 }
 
 export interface ExecutionError {
@@ -301,6 +363,7 @@ export interface ExecutionDetail extends Execution {
   timeline: TimelineEvent[];
   logs: LogEntry[];
   toolCalls: ToolCall[];
+  approvals: Approval[];
   error: ExecutionError | null;
   result: string | null;
 }

@@ -4,6 +4,8 @@ Run locally with:
     python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 """
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -18,6 +20,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from app.core.security import configure_password_cost
 from app.db.session import create_engine, create_session_factory
+from app.runtime.worker import work_loop, worker_name
 from app.services.login_guard import LoginGuard
 
 logger = logging.getLogger(__name__)
@@ -45,9 +48,22 @@ def create_app(
         app.state.session_factory = create_session_factory(engine)
         # Credentials are stripped before logging.
         logger.info("database configured: %s", resolved.safe_database_url)
+
+        # The execution worker runs beside the API unless it is deployed
+        # separately. It orchestrates runs; it executes no agent code.
+        stop = asyncio.Event()
+        worker: asyncio.Task[None] | None = None
+        if resolved.runtime_worker_enabled:
+            worker = asyncio.create_task(
+                work_loop(app.state.session_factory, worker=worker_name(), stop=stop)
+            )
         try:
             yield
         finally:
+            stop.set()
+            if worker is not None:
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    await asyncio.wait_for(worker, timeout=5)
             await engine.dispose()
 
     docs_enabled = resolved.api_docs_enabled
