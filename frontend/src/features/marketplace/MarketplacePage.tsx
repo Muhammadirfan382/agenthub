@@ -1,7 +1,7 @@
 import { SearchX, Store } from 'lucide-react';
 import { useId } from 'react';
 import { useSearchParams } from 'react-router';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { QueryState } from '@/components/feedback/QueryState';
@@ -19,8 +19,7 @@ import { MarketplaceCard } from './components/MarketplaceCard';
 const COLLECTIONS: { id: MarketplaceCollection; label: string }[] = [
   { id: 'all', label: 'All agents' },
   { id: 'verified', label: 'Verified' },
-  { id: 'popular', label: 'Popular' },
-  { id: 'recent', label: 'Recently added' },
+  { id: 'installed', label: 'Installed' },
 ];
 
 export default function MarketplacePage() {
@@ -50,12 +49,18 @@ export default function MarketplacePage() {
 
   return (
     <>
-      <PageHeader title="Marketplace" description="Discover agents by what they do, how they are verified and how much access they need." />
+      <PageHeader
+        title="Marketplace"
+        description="Discover agents by what they do, how they are verified and how much access they ask for."
+      />
 
-      <DemoNotice className="mb-6" title="Demo marketplace data">
-        Ratings, usage counts and security ratings are invented for demonstration. They are not real downloads, users,
-        reviews, execution statistics or security scan results.
-      </DemoNotice>
+      <DataNotice
+        resource="marketplace"
+        className="mb-6"
+        demoTitle="Demo marketplace data"
+        demo="Ratings, usage counts and security ratings are invented for demonstration. They are not real downloads, users, reviews, execution statistics or security scan results."
+        live="Every listing is a published version of a real agent. Installing one grants it only what you choose: nothing is granted by installing."
+      />
 
       <Tabs label="Collections" idPrefix={idPrefix} items={COLLECTIONS} value={params.collection} onChange={(collection) => update({ collection })} />
 

@@ -139,6 +139,23 @@ authorization control.
   A 404 on a detail request becomes `null`; other failures raise `ApiError`
   carrying the backend's own `code` and `message`.
 
+### The registry (Phase 4)
+
+- **Marketplace** (`features/marketplace`): listings come from the API, one per
+  published version. Tabs are views over the same listings (all, verified,
+  installed), not different data sets.
+- **A listing page** shows the manifest first - what the agent asks for - and
+  then the grant editor. `GrantEditor` offers each capability only up to the
+  level the manifest requested, forces approval where the publisher requires it,
+  insists on a scope in words, and shows the risk the chosen grants add up to.
+  The backend validates all of it again.
+- **Publishing** lives on the agent detail page: a dialog takes a changelog and a
+  visibility, and says plainly that the configuration is frozen as it is.
+  Versions are read from the API, not from the agent record.
+- **Demo mode** keeps working: invented popularity numbers live in
+  `demoStats`, which the real API never returns, so a demo-only figure cannot
+  appear in API mode by accident.
+
 ### Sessions and roles (Phase 3)
 
 `AuthService` owns identity: `session()`, `login()`, `logout()`, `changePassword()`,
@@ -168,8 +185,9 @@ user can switch it in **Settings → API**; the choice is persisted per browser 
 `stores/dataSourceStore.ts`. Switching rebuilds the services **and** the query
 cache, so demo rows can never be displayed as backend data.
 
-In API mode the backend serves identity (sessions, members), agents, executions
-and the dashboard counts derived from them. Marketplace, security, analytics and the profile still come from demo
+In API mode the backend serves identity (sessions, members), agents, versions,
+marketplace listings, installations, executions and the dashboard counts derived
+from them. Marketplace, security, analytics and the profile still come from demo
 data. `services.liveResources` states exactly which resources are real, and
 `useIsLive(resource)` drives the `DataNotice` on each page, so no page can keep
 claiming "demonstration data" while reading from the backend.

@@ -31,12 +31,15 @@ describe('agent details', () => {
     expect(screen.getByText(/nothing shown here is a security control/)).toBeInTheDocument();
   });
 
-  it('shows version history and demo security data', async () => {
+  it('shows published versions and demo security data', async () => {
     const { user } = renderApp('/agents/agt_incident_responder');
     await screen.findByRole('heading', { level: 1, name: 'Incident Responder' });
 
     await user.click(screen.getByRole('tab', { name: 'Versions' }));
-    expect(screen.getByText('v1.0.0-rc.1')).toBeInTheDocument();
+    // History comes from publishing now: the row describes the published manifest.
+    expect(
+      await screen.findByText('Published from the demonstration configuration.'),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: 'Security' }));
     expect(screen.getByText('Demo security data')).toBeInTheDocument();

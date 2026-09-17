@@ -1,6 +1,25 @@
-import type { AgentPermission, RiskLevel } from '@/types/domain';
+import type { AgentPermission, CapabilityKey, PermissionLevel, RiskLevel } from '@/types/domain';
+import { RISK_LEVELS } from '@/types/domain';
 
 export const RISK_RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+/** Inherent risk of each capability before the access level is considered. */
+export const CAPABILITY_BASE_RISK: Record<CapabilityKey, RiskLevel> = {
+  web_access: 'medium',
+  api_access: 'high',
+  file_access: 'medium',
+  database_access: 'high',
+  tool_calling: 'low',
+  code_execution: 'critical',
+  email_send: 'high',
+};
+
+/** Mirrors the backend rule, which is the one that counts. */
+export function permissionRisk(capability: CapabilityKey, level: PermissionLevel): RiskLevel {
+  const base = RISK_RANK[CAPABILITY_BASE_RISK[capability]];
+  const adjusted = level === 'read_only' ? base - 1 : level === 'allowed' ? base + 1 : base;
+  return RISK_LEVELS[Math.max(0, Math.min(3, adjusted))] ?? 'low';
+}
 
 const BASE_SCORE: Record<RiskLevel, number> = { low: 15, medium: 40, high: 65, critical: 85 };
 

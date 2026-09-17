@@ -24,7 +24,8 @@ class TestCreate:
         assert agent["riskScore"] == 5
         # Attributed to the signed-in user, not to anything the client sent.
         assert agent["creator"]["name"] == "Admin Person"
-        assert agent["versions"][0]["version"] == "1.0.0"
+        # New agents are private until someone publishes and lists them.
+        assert agent["visibility"] == "private"
         assert {check["status"] for check in agent["securityChecks"]} == {"not_run"}
         assert all(permission["scope"] == "Not granted" for permission in agent["permissions"])
 
@@ -189,7 +190,7 @@ class TestListAndRead:
 
 
 class TestUpdateAndDelete:
-    def test_updates_configuration_and_records_a_new_version(self, client: TestClient) -> None:
+    def test_updates_the_configuration_in_place(self, client: TestClient) -> None:
         agent = create_agent(client, name="Editable Agent")
         payload = agent_payload(
             name="Renamed Agent", version="1.1.0", description="An updated description for tests."
@@ -199,9 +200,9 @@ class TestUpdateAndDelete:
 
         assert updated["name"] == "Renamed Agent"
         assert updated["version"] == "1.1.0"
-        assert updated["versions"][0]["version"] == "1.1.0"
-        assert updated["versions"][0]["status"] == "current"
         assert updated["updatedAt"] >= agent["updatedAt"]
+        # History is not written by editing: it is written by publishing.
+        assert client.get(f"/api/v1/agents/{agent['id']}/versions").json()["total"] == 0
 
     def test_rejects_renaming_onto_an_existing_name(self, client: TestClient) -> None:
         create_agent(client, name="First Agent")

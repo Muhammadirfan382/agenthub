@@ -110,14 +110,7 @@ async def create_agent(session: AsyncSession, draft: AgentDraft, *, context: Aut
         created_at=now,
         updated_at=now,
         last_execution_at=None,
-        versions=[
-            {
-                "version": draft.version,
-                "releasedAt": now.isoformat(),
-                "status": "draft",
-                "changes": ["Created through the AgentHub API"],
-            }
-        ],
+        visibility="private",
         security_checks=INITIAL_SECURITY_CHECKS,
         **documents,
     )
@@ -155,21 +148,6 @@ async def update_agent(
     documents = _draft_documents(draft)
     level, score = derive_risk(documents["permissions"])
     now = now_utc()
-
-    if draft.version != agent.version:
-        history = [
-            {**entry, "status": "previous"} if entry.get("status") == "current" else entry
-            for entry in agent.versions
-        ]
-        agent.versions = [
-            {
-                "version": draft.version,
-                "releasedAt": now.isoformat(),
-                "status": "current",
-                "changes": ["Updated through the AgentHub API"],
-            },
-            *history,
-        ]
 
     agent.name = draft.name
     agent.description = draft.description

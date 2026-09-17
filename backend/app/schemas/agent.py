@@ -23,7 +23,7 @@ from app.schemas.enums import (
     SandboxMode,
     SecurityCheckStatus,
     VerificationStatus,
-    VersionStatus,
+    Visibility,
 )
 from app.services.catalog import MODEL_IDS, MODEL_PROVIDER, TOOL_CAPABILITIES, TOOL_IDS
 from app.services.risk import permission_risk
@@ -90,13 +90,6 @@ class AgentPermission(CamelModel):
     scope: str = Field(default="", max_length=120)
     # Derived server-side from capability and level; any value sent is replaced.
     risk: RiskLevel = "low"
-
-
-class AgentVersion(CamelModel):
-    version: str
-    released_at: datetime
-    status: VersionStatus
-    changes: list[str] = Field(default_factory=list)
 
 
 class SecurityCheck(CamelModel):
@@ -249,6 +242,7 @@ class AgentRead(CamelModel):
     version: str
     status: AgentStatus
     verification: VerificationStatus
+    visibility: Visibility
     risk_level: RiskLevel
     risk_score: int
     creator: Person
@@ -261,5 +255,4 @@ class AgentRead(CamelModel):
     permissions: list[AgentPermission]
     resource_limits: ResourceLimits
     security_policy: SecurityPolicy
-    versions: list[AgentVersion]
     security_checks: list[SecurityCheck]

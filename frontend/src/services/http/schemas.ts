@@ -57,6 +57,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   version: z.string(),
   status: agentStatus,
   verification,
+  visibility: z.enum(['private', 'organization', 'public']),
   riskLevel,
   riskScore: z.number(),
   creator: person,
@@ -85,14 +86,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     approvalRequiredFor: z.array(riskLevel),
     auditLogging: z.boolean(),
   }),
-  versions: z.array(
-    z.object({
-      version: z.string(),
-      releasedAt: iso,
-      status: z.enum(['current', 'previous', 'deprecated', 'draft']),
-      changes: z.array(z.string()),
-    }),
-  ),
   securityChecks: z.array(
     z.object({
       id,

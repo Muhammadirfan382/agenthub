@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentCategory,
   AgentPermission,
+  AgentVersion,
   AgentStatus,
   AnalyticsSummary,
   BackendHealth,
@@ -10,9 +11,13 @@ import type {
   ExecutionDetail,
   ExecutionStatus,
   ID,
+  Installation,
+  InstallationDetail,
   MarketplaceListing,
+  MarketplaceListingDetail,
   Member,
   ModelConfig,
+  PermissionGrant,
   PlatformPolicy,
   ResourceLimits,
   RiskLevel,
@@ -20,6 +25,7 @@ import type {
   SecurityOverview,
   SecurityPolicy,
   SessionInfo,
+  Visibility,
   SystemComponentStatus,
   UserProfile,
 } from '@/types/domain';
@@ -65,9 +71,20 @@ export interface AgentService {
   setStatus(id: ID, status: AgentStatus): Promise<Agent>;
   /** Requests an execution. Nothing actually runs until the Phase 5 runtime exists. */
   requestExecution(id: ID): Promise<Execution>;
+  /** Published manifests, newest first. */
+  versions(id: ID): Promise<AgentVersion[]>;
+  /** Freezes the current configuration as a published version. */
+  publish(id: ID, input: PublishInput): Promise<AgentVersion>;
+  setVisibility(id: ID, visibility: Visibility): Promise<Agent>;
 }
 
-export type MarketplaceCollection = 'all' | 'verified' | 'popular' | 'recent';
+export interface PublishInput {
+  changelog: string[];
+  visibility?: Visibility;
+}
+
+/** Tabs over the same listings, not different data sets. */
+export type MarketplaceCollection = 'all' | 'verified' | 'installed';
 
 export interface MarketplaceParams {
   search?: string;
@@ -78,7 +95,29 @@ export interface MarketplaceParams {
 
 export interface MarketplaceService {
   list(params?: MarketplaceParams): Promise<MarketplaceListing[]>;
+  get(id: ID): Promise<MarketplaceListingDetail | null>;
   tags(): Promise<string[]>;
+}
+
+export interface InstallInput {
+  agentVersionId: ID;
+  /** Capabilities left out are denied: nothing is granted implicitly. */
+  grants: PermissionGrant[];
+  note?: string | null;
+}
+
+export interface InstallationPatch {
+  grants?: PermissionGrant[];
+  status?: Installation['status'];
+  note?: string | null;
+}
+
+export interface InstallationService {
+  list(): Promise<Installation[]>;
+  get(id: ID): Promise<InstallationDetail | null>;
+  install(input: InstallInput): Promise<InstallationDetail>;
+  update(id: ID, patch: InstallationPatch): Promise<InstallationDetail>;
+  uninstall(id: ID): Promise<void>;
 }
 
 export interface ExecutionListParams {
@@ -150,7 +189,13 @@ export interface MemberService {
 export type DataSource = 'demo' | 'api';
 
 /** Parts of the app the real backend can serve today. Everything else is demo data. */
-export type LiveResource = 'agents' | 'executions' | 'dashboard' | 'members';
+export type LiveResource =
+  | 'agents'
+  | 'executions'
+  | 'dashboard'
+  | 'members'
+  | 'marketplace'
+  | 'installations';
 
 export interface Services {
   dataSource: DataSource;
@@ -164,4 +209,5 @@ export interface Services {
   analytics: AnalyticsService;
   auth: AuthService;
   members: MemberService;
+  installations: InstallationService;
 }

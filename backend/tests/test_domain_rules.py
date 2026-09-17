@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import DEV_DATABASE_URL, Settings
-from app.core.errors import ForbiddenError
+from app.core.errors import ForbiddenError, UnprocessableError
 from app.core.rate_limit import SlidingWindowLimiter
 from app.core.security import (
     configure_password_cost,
@@ -11,7 +11,10 @@ from app.core.security import (
     new_session_token,
     verify_password,
 )
+from app.schemas.enums import CAPABILITY_KEYS
+from app.schemas.registry import PermissionGrant
 from app.services.authorization import can, has_role, require
+from app.services.registry_service import normalise_grants, unusable_tools
 from app.services.risk import derive_risk, permission_risk
 
 
@@ -187,3 +190,80 @@ class TestLoginThrottling:
         limiter.reset("someone@example.com")
 
         assert limiter.check("someone@example.com") is True
+
+
+def manifest_asking_for(**levels: str) -> dict[str, object]:
+    """A manifest that requests the given levels, and nothing else."""
+    return {
+        "tools": ["web_search"],
+        "requiredPermissions": [
+            {
+                "capability": capability,
+                "level": levels.get(capability, "denied"),
+                "requiresApproval": capability == "code_execution",
+                "scope": "Requested by the publisher",
+                "risk": "low",
+            }
+            for capability in CAPABILITY_KEYS
+        ],
+    }
+
+
+class TestGrantNormalisation:
+    def test_missing_capabilities_are_denied_not_omitted(self) -> None:
+        grants = normalise_grants(manifest_asking_for(web_access="allowed"), [])
+
+        assert len(grants) == len(CAPABILITY_KEYS)
+        assert {grant["level"] for grant in grants} == {"denied"}
+        assert all(grant["scope"] == "Not granted" for grant in grants)
+
+    def test_a_capability_absent_from_the_manifest_is_refused(self) -> None:
+        manifest: dict[str, object] = {"tools": [], "requiredPermissions": []}
+
+        with pytest.raises(UnprocessableError, match="did not ask for"):
+            normalise_grants(
+                manifest,
+                [PermissionGrant(capability="web_access", level="read_only", scope="Anything")],
+            )
+
+    def test_risk_is_recomputed_and_never_taken_from_the_client(self) -> None:
+        grants = normalise_grants(
+            manifest_asking_for(web_access="allowed"),
+            [
+                PermissionGrant(
+                    capability="web_access",
+                    level="allowed",
+                    scope="Everything on the public web",
+                    risk="low",
+                )
+            ],
+        )
+
+        granted = next(grant for grant in grants if grant["capability"] == "web_access")
+        assert granted["risk"] == "high"
+
+    def test_the_same_capability_cannot_be_granted_twice(self) -> None:
+        manifest = manifest_asking_for(web_access="restricted")
+        duplicate = PermissionGrant(
+            capability="web_access", level="read_only", scope="Documentation"
+        )
+
+        with pytest.raises(UnprocessableError, match="only once"):
+            normalise_grants(manifest, [duplicate, duplicate])
+
+
+class TestUnusableTools:
+    def test_reports_tools_whose_capability_is_denied(self) -> None:
+        manifest = manifest_asking_for(web_access="restricted")
+        denied = normalise_grants(manifest, [])
+        allowed = normalise_grants(
+            manifest,
+            [
+                PermissionGrant(
+                    capability="web_access", level="restricted", scope="Allow-listed docs"
+                )
+            ],
+        )
+
+        assert unusable_tools(manifest, denied) == ["web_search"]
+        assert unusable_tools(manifest, allowed) == []

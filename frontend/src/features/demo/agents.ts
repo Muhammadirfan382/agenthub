@@ -56,6 +56,7 @@ export const demoAgents: Agent[] = [
     version: '2.3.1',
     status: 'active',
     verification: 'verified',
+    visibility: 'public',
     riskLevel: 'low',
     riskScore: 18,
     creator: demoPeople.maya,
@@ -72,11 +73,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 600, maxMemoryMb: 512, maxTokensPerRun: 60000, maxToolCalls: 40 },
     securityPolicy: { sandbox: 'strict', networkEgress: 'allow_list', allowedDomains: ['arxiv.org', 'docs.example.com'], approvalRequiredFor: ['high', 'critical'], auditLogging: true },
-    versions: [
-      { version: '2.3.1', releasedAt: daysAgo(3), status: 'current', changes: ['Improved citation deduplication', 'Tighter source allow-list'] },
-      { version: '2.3.0', releasedAt: daysAgo(21), status: 'previous', changes: ['Added document reader tool'] },
-      { version: '2.2.4', releasedAt: daysAgo(60), status: 'deprecated', changes: ['Initial citation formatter'] },
-    ],
     securityChecks: checks(['passed', 'passed', 'passed', 'passed', 'passed']),
   },
   {
@@ -88,6 +84,7 @@ export const demoAgents: Agent[] = [
     version: '1.8.0',
     status: 'active',
     verification: 'verified',
+    visibility: 'organization',
     riskLevel: 'high',
     riskScore: 72,
     creator: demoPeople.omar,
@@ -105,10 +102,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 900, maxMemoryMb: 1024, maxTokensPerRun: 120000, maxToolCalls: 80 },
     securityPolicy: { sandbox: 'strict', networkEgress: 'allow_list', allowedDomains: ['siem.internal.example'], approvalRequiredFor: ['high', 'critical'], auditLogging: true },
-    versions: [
-      { version: '1.8.0', releasedAt: daysAgo(6), status: 'current', changes: ['Correlates alerts across 24h window', 'Approval required before paging on-call'] },
-      { version: '1.7.2', releasedAt: daysAgo(40), status: 'previous', changes: ['Reduced false-positive escalations'] },
-    ],
     securityChecks: checks(['passed', 'passed', 'warning', 'passed', 'passed']),
   },
   {
@@ -120,6 +113,7 @@ export const demoAgents: Agent[] = [
     version: '3.0.2',
     status: 'active',
     verification: 'verified',
+    visibility: 'public',
     riskLevel: 'medium',
     riskScore: 44,
     creator: demoPeople.lena,
@@ -137,11 +131,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 1200, maxMemoryMb: 2048, maxTokensPerRun: 150000, maxToolCalls: 60 },
     securityPolicy: { sandbox: 'strict', networkEgress: 'none', allowedDomains: [], approvalRequiredFor: ['critical'], auditLogging: true },
-    versions: [
-      { version: '3.0.2', releasedAt: daysAgo(1), status: 'current', changes: ['Fixed duplicate comments on force-push'] },
-      { version: '3.0.0', releasedAt: daysAgo(30), status: 'previous', changes: ['Sandboxed test execution', 'Breaking: new manifest format'] },
-      { version: '2.9.1', releasedAt: daysAgo(95), status: 'deprecated', changes: ['Legacy review engine'] },
-    ],
     securityChecks: checks(['passed', 'passed', 'passed', 'warning', 'passed']),
   },
   {
@@ -153,6 +142,7 @@ export const demoAgents: Agent[] = [
     version: '2.1.0',
     status: 'paused',
     verification: 'verified',
+    visibility: 'private',
     riskLevel: 'medium',
     riskScore: 38,
     creator: demoPeople.priya,
@@ -170,10 +160,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 1800, maxMemoryMb: 4096, maxTokensPerRun: 100000, maxToolCalls: 50 },
     securityPolicy: { sandbox: 'strict', networkEgress: 'none', allowedDomains: [], approvalRequiredFor: ['high', 'critical'], auditLogging: true },
-    versions: [
-      { version: '2.1.0', releasedAt: daysAgo(12), status: 'current', changes: ['Anomaly detection on time series'] },
-      { version: '2.0.0', releasedAt: daysAgo(70), status: 'previous', changes: ['Read-only warehouse connector'] },
-    ],
     securityChecks: checks(['passed', 'passed', 'passed', 'passed', 'warning']),
   },
   {
@@ -185,6 +171,7 @@ export const demoAgents: Agent[] = [
     version: '0.9.4',
     status: 'active',
     verification: 'pending',
+    visibility: 'private',
     riskLevel: 'critical',
     riskScore: 88,
     creator: demoPeople.sam,
@@ -202,11 +189,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 900, maxMemoryMb: 1024, maxTokensPerRun: 80000, maxToolCalls: 30 },
     securityPolicy: { sandbox: 'strict', networkEgress: 'allow_list', allowedDomains: ['status.example.com'], approvalRequiredFor: ['medium', 'high', 'critical'], auditLogging: true },
-    versions: [
-      { version: '0.9.4', releasedAt: hoursAgo(20), status: 'current', changes: ['Every remediation step requires approval'] },
-      { version: '0.9.3', releasedAt: daysAgo(9), status: 'previous', changes: ['Added status page updates'] },
-      { version: '1.0.0-rc.1', releasedAt: hoursAgo(4), status: 'draft', changes: ['Release candidate awaiting verification'] },
-    ],
     securityChecks: checks(['passed', 'passed', 'failed', 'warning', 'passed']),
   },
   {
@@ -218,6 +200,7 @@ export const demoAgents: Agent[] = [
     version: '1.2.3',
     status: 'active',
     verification: 'verified',
+    visibility: 'public',
     riskLevel: 'low',
     riskScore: 24,
     creator: demoPeople.priya,
@@ -234,10 +217,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 300, maxMemoryMb: 512, maxTokensPerRun: 30000, maxToolCalls: 20 },
     securityPolicy: { sandbox: 'standard', networkEgress: 'allow_list', allowedDomains: ['helpdesk.example.com'], approvalRequiredFor: ['high', 'critical'], auditLogging: true },
-    versions: [
-      { version: '1.2.3', releasedAt: daysAgo(8), status: 'current', changes: ['Tone controls for replies'] },
-      { version: '1.2.0', releasedAt: daysAgo(50), status: 'previous', changes: ['Knowledge base search'] },
-    ],
     securityChecks: checks(['passed', 'passed', 'passed', 'passed', 'passed']),
   },
   {
@@ -249,6 +228,7 @@ export const demoAgents: Agent[] = [
     version: '0.3.0',
     status: 'draft',
     verification: 'unverified',
+    visibility: 'private',
     riskLevel: 'low',
     riskScore: 16,
     creator: demoPeople.maya,
@@ -264,7 +244,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 900, maxMemoryMb: 512, maxTokensPerRun: 40000, maxToolCalls: 200 },
     securityPolicy: { sandbox: 'standard', networkEgress: 'allow_list', allowedDomains: ['www.example.com'], approvalRequiredFor: ['high', 'critical'], auditLogging: true },
-    versions: [{ version: '0.3.0', releasedAt: hoursAgo(9), status: 'draft', changes: ['First draft of crawler configuration'] }],
     securityChecks: checks(['passed', 'passed', 'not_run', 'not_run', 'warning']),
   },
   {
@@ -276,6 +255,7 @@ export const demoAgents: Agent[] = [
     version: '1.4.0',
     status: 'disabled',
     verification: 'rejected',
+    visibility: 'public',
     riskLevel: 'high',
     riskScore: 67,
     creator: demoPeople.omar,
@@ -293,10 +273,6 @@ export const demoAgents: Agent[] = [
     ]),
     resourceLimits: { maxRuntimeSeconds: 1200, maxMemoryMb: 1024, maxTokensPerRun: 60000, maxToolCalls: 100 },
     securityPolicy: { sandbox: 'standard', networkEgress: 'allow_list', allowedDomains: ['erp.internal.example'], approvalRequiredFor: ['critical'], auditLogging: true },
-    versions: [
-      { version: '1.4.0', releasedAt: daysAgo(15), status: 'current', changes: ['Ledger write-back (rejected in review)'] },
-      { version: '1.3.1', releasedAt: daysAgo(60), status: 'previous', changes: ['Read-only reconciliation'] },
-    ],
     securityChecks: checks(['warning', 'passed', 'failed', 'warning', 'passed']),
   },
 ];

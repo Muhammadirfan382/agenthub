@@ -50,6 +50,9 @@ class Agent(Base):
     version: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     verification: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Who may see this agent in the marketplace. Private is the default: an
+    # agent is only listed once someone deliberately widens it.
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="private")
     risk_level: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     risk_score: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -73,9 +76,6 @@ class Agent(Base):
     )
     resource_limits: Mapped[dict[str, Any]] = mapped_column(JsonDocument, nullable=False)
     security_policy: Mapped[dict[str, Any]] = mapped_column(JsonDocument, nullable=False)
-    versions: Mapped[list[dict[str, Any]]] = mapped_column(
-        JsonDocument, nullable=False, default=list
-    )
     security_checks: Mapped[list[dict[str, Any]]] = mapped_column(
         JsonDocument, nullable=False, default=list
     )

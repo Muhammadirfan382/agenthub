@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { CAPABILITY_KEYS, CAPABILITY_META } from '@/components/status/meta';
-import { RISK_RANK } from '@/lib/risk';
+import { RISK_RANK, permissionRisk } from '@/lib/risk';
 import type { AgentDraft } from '@/services/contracts';
-import type { Agent, AgentCategory, CapabilityKey, PermissionLevel, RiskLevel } from '@/types/domain';
+import type { Agent, AgentCategory, CapabilityKey, RiskLevel } from '@/types/domain';
 import { AGENT_CATEGORIES, RISK_LEVELS } from '@/types/domain';
 
 export const MODEL_OPTIONS = [
@@ -21,22 +21,8 @@ export const TOOL_OPTIONS: { id: string; label: string; capability: CapabilityKe
   { id: 'chart_renderer', label: 'Chart renderer', capability: 'tool_calling' },
 ];
 
-/** Inherent risk of each capability before the access level is considered. */
-export const CAPABILITY_BASE_RISK: Record<CapabilityKey, RiskLevel> = {
-  web_access: 'medium',
-  api_access: 'high',
-  file_access: 'medium',
-  database_access: 'high',
-  tool_calling: 'low',
-  code_execution: 'critical',
-  email_send: 'high',
-};
-
-export function permissionRisk(capability: CapabilityKey, level: PermissionLevel): RiskLevel {
-  const base = RISK_RANK[CAPABILITY_BASE_RISK[capability]];
-  const adjusted = level === 'read_only' ? base - 1 : level === 'allowed' ? base + 1 : base;
-  return RISK_LEVELS[Math.max(0, Math.min(3, adjusted))] ?? 'low';
-}
+// The risk rules live in lib/risk.ts: they are shared, not form-specific.
+export { CAPABILITY_BASE_RISK, permissionRisk } from '@/lib/risk';
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const TAG = /^[a-z0-9][a-z0-9-]{0,23}$/;

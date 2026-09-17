@@ -21,11 +21,12 @@ from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.core.time import now_utc
-from app.db.models import Agent, Execution, User
+from app.db.models import Agent, AgentVersion, Execution, Installation, User
 from app.db.session import create_engine, create_session_factory
 from app.repositories import identity_repository
 from app.schemas.enums import CAPABILITY_KEYS, Role
-from app.services import auth_service
+from app.schemas.registry import PermissionGrant
+from app.services import auth_service, registry_service
 from app.services.agent_service import (
     INITIAL_SECURITY_CHECKS,
     new_agent_id,
@@ -34,6 +35,17 @@ from app.services.agent_service import (
 from app.services.risk import derive_risk, permission_risk
 
 ORGANIZATION_NAME = "Demo Workspace"
+# A second organization exists so the marketplace has something to install that
+# does not already belong to you.
+PARTNER_NAME = "Partner Studio"
+PARTNER_ACCOUNT = ("partner@example.com", "Partner Owner")
+
+# How each demo agent is shared once it has a published version.
+VISIBILITY = {
+    "Research Scout": "public",
+    "Threat Triage": "organization",
+    "Code Review Assistant": "public",
+}
 
 # Addresses in example.com are reserved for documentation and cannot receive mail.
 DEMO_ACCOUNTS: list[tuple[str, str, Role]] = [
@@ -263,6 +275,58 @@ DEMO_EXECUTIONS: list[dict[str, Any]] = [
 ]
 
 
+def publish(agent: Agent, user: User, changelog: list[str]) -> AgentVersion:
+    """Freeze the agent's configuration as a published version."""
+    level, score = derive_risk(agent.permissions)
+    return AgentVersion(
+        id=registry_service.new_version_id(),
+        agent_id=agent.id,
+        organization_id=agent.organization_id,
+        version=agent.version,
+        status="published",
+        manifest=registry_service.build_manifest(agent),
+        changelog=changelog,
+        risk_level=level,
+        risk_score=score,
+        created_at=NOW - timedelta(days=2),
+        published_at=NOW - timedelta(days=2),
+        created_by_id=user.id,
+        created_by_name=user.name,
+    )
+
+
+PARTNER_AGENT: dict[str, Any] = {
+    "name": "Contract Summariser",
+    "description": (
+        "Reads contract documents and produces a clause-by-clause summary with the "
+        "obligations and dates it found."
+    ),
+    "category": "operations",
+    "tags": ["contracts", "summaries", "legal"],
+    "version": "1.2.0",
+    "model": {
+        "provider": "Model gateway",
+        "model": "reasoning-large",
+        "temperature": 0.1,
+        "maxOutputTokens": 8192,
+    },
+    "tools": ["document_reader"],
+    "resource_limits": {
+        "maxRuntimeSeconds": 600,
+        "maxMemoryMb": 1024,
+        "maxTokensPerRun": 90000,
+        "maxToolCalls": 30,
+    },
+    "security_policy": {
+        "sandbox": "strict",
+        "networkEgress": "none",
+        "allowedDomains": [],
+        "approvalRequiredFor": ["high", "critical"],
+        "auditLogging": True,
+    },
+}
+
+
 async def seed() -> None:
     settings = get_settings()
     engine = create_engine(settings)
@@ -271,6 +335,8 @@ async def seed() -> None:
     created_executions = 0
 
     created_accounts: list[tuple[str, str]] = []
+    published_versions = 0
+    created_installations = 0
 
     try:
         async with factory() as session:
@@ -339,14 +405,7 @@ async def seed() -> None:
                     permissions=spec["permissions"],
                     resource_limits=spec["resource_limits"],
                     security_policy=spec["security_policy"],
-                    versions=[
-                        {
-                            "version": spec["version"],
-                            "releasedAt": (NOW - timedelta(days=2)).isoformat(),
-                            "status": "current",
-                            "changes": ["Seeded demonstration agent"],
-                        }
-                    ],
+                    # History comes from published versions now, not a JSON blob.
                     security_checks=INITIAL_SECURITY_CHECKS,
                 )
                 session.add(agent)
@@ -354,6 +413,17 @@ async def seed() -> None:
                 created_agents += 1
 
             await session.flush()
+
+            for name, visibility in VISIBILITY.items():
+                listed = by_name.get(name)
+                if listed is None or listed.visibility != "private":
+                    continue
+                session.add(publish(listed, owner, ["Published for the AgentHub demo."]))
+                listed.visibility = visibility
+                published_versions += 1
+            await session.flush()
+
+            created_installations += await seed_partner_organization(session)
 
             # Timestamps are relative to the current run, so they can never match an
             # earlier row: treat any existing execution as "already seeded" instead.
@@ -388,7 +458,10 @@ async def seed() -> None:
     finally:
         await engine.dispose()
 
-    print(f"Seed complete: {created_agents} agents and {created_executions} executions added.")
+    print(
+        f"Seed complete: {created_agents} agents, {published_versions} published versions, "
+        f"{created_installations} installations and {created_executions} executions added."
+    )
     print(f"Database: {settings.safe_database_url}")
     if created_accounts:
         print()
@@ -396,6 +469,105 @@ async def seed() -> None:
         for email, password in created_accounts:
             print(f"  {email}  {password}")
         print("Change or delete them before exposing this instance to anyone else.")
+
+
+async def seed_partner_organization(session: Any) -> int:
+    """A second organization publishing one agent, installed by the demo workspace.
+
+    The install is deliberately narrower than the manifest asks for, so the UI
+    shows the difference between what an agent requests and what it was given.
+    """
+    demo_org = await identity_repository.get_organization_by_slug(
+        session, auth_service.slugify(ORGANIZATION_NAME)
+    )
+    partner = await identity_repository.get_organization_by_slug(
+        session, auth_service.slugify(PARTNER_NAME)
+    )
+    if partner is not None or demo_org is None:
+        return 0
+
+    partner = await auth_service.create_organization(session, name=PARTNER_NAME)
+    email, name = PARTNER_ACCOUNT
+    user = await identity_repository.get_user_by_email(session, email)
+    if user is None:
+        user = await auth_service.create_user(
+            session, email=email, name=name, password=secrets.token_urlsafe(16)
+        )
+    await auth_service.add_member(session, organization=partner, user=user, role="owner")
+
+    granted_permissions = permissions(
+        file_access={"level": "read_only", "scope": "Contract folder you choose"},
+        tool_calling={"level": "allowed", "scope": "Declared reading tools"},
+    )
+    level, score = derive_risk(granted_permissions)
+    agent = Agent(
+        id=new_agent_id(PARTNER_AGENT["name"]),
+        organization_id=partner.id,
+        name=PARTNER_AGENT["name"],
+        description=PARTNER_AGENT["description"],
+        category=PARTNER_AGENT["category"],
+        tags=PARTNER_AGENT["tags"],
+        version=PARTNER_AGENT["version"],
+        status="active",
+        verification="verified",
+        visibility="public",
+        risk_level=level,
+        risk_score=score,
+        creator_id=user.id,
+        creator_name=user.name,
+        owner_id=user.id,
+        owner_name=user.name,
+        created_at=NOW - timedelta(days=45),
+        updated_at=NOW - timedelta(days=5),
+        last_execution_at=None,
+        model=PARTNER_AGENT["model"],
+        tools=PARTNER_AGENT["tools"],
+        permissions=granted_permissions,
+        resource_limits=PARTNER_AGENT["resource_limits"],
+        security_policy=PARTNER_AGENT["security_policy"],
+        security_checks=INITIAL_SECURITY_CHECKS,
+    )
+    session.add(agent)
+    await session.flush()
+
+    version = publish(agent, user, ["Clause summaries and obligation extraction."])
+    session.add(version)
+    await session.flush()
+
+    # The demo workspace grants less than the manifest asks for.
+    grants = registry_service.normalise_grants(
+        version.manifest,
+        [
+            PermissionGrant(
+                capability="file_access",
+                level="read_only",
+                scope="Shared contracts folder (read only)",
+            )
+        ],
+    )
+    granted_level, granted_score = derive_risk(grants)
+    installer = await identity_repository.get_user_by_email(session, DEMO_ACCOUNTS[0][0])
+    session.add(
+        Installation(
+            id=registry_service.new_installation_id(),
+            organization_id=demo_org.id,
+            agent_id=agent.id,
+            agent_version_id=version.id,
+            agent_name=agent.name,
+            publisher_name=partner.name,
+            status="active",
+            grants=grants,
+            risk_level=granted_level,
+            risk_score=granted_score,
+            note="Trial install: reading only, no tool calling.",
+            installed_by_id=installer.id if installer else user.id,
+            installed_by_name=installer.name if installer else user.name,
+            created_at=NOW - timedelta(days=3),
+            updated_at=NOW - timedelta(days=3),
+        )
+    )
+    await session.flush()
+    return 1
 
 
 if __name__ == "__main__":

@@ -47,15 +47,6 @@ export interface AgentPermission {
   risk: RiskLevel;
 }
 
-export type VersionStatus = 'current' | 'previous' | 'deprecated' | 'draft';
-
-export interface AgentVersion {
-  version: string;
-  releasedAt: ISODate;
-  status: VersionStatus;
-  changes: string[];
-}
-
 export type SecurityCheckStatus = 'passed' | 'warning' | 'failed' | 'not_run';
 
 export interface SecurityCheck {
@@ -103,6 +94,7 @@ export interface Agent {
   version: string;
   status: AgentStatus;
   verification: VerificationStatus;
+  visibility: Visibility;
   riskLevel: RiskLevel;
   /** 0–100, higher is riskier. */
   riskScore: number;
@@ -116,29 +108,116 @@ export interface Agent {
   permissions: AgentPermission[];
   resourceLimits: ResourceLimits;
   securityPolicy: SecurityPolicy;
-  versions: AgentVersion[];
   securityChecks: SecurityCheck[];
 }
 
+/** How widely an agent is listed. Private is the default. */
+export type Visibility = 'private' | 'organization' | 'public';
+
+export const VISIBILITY_LABELS: Record<Visibility, string> = {
+  private: 'Private',
+  organization: 'Organization',
+  public: 'Public',
+};
+
+export type VersionStatus = 'draft' | 'published' | 'deprecated';
+
+/**
+ * What a published version asks for. Frozen at publish time: editing the agent
+ * afterwards changes the next version, never this one.
+ */
+export interface AgentManifest {
+  name: string;
+  description: string;
+  category: AgentCategory;
+  tags: string[];
+  version: string;
+  model: ModelConfig;
+  tools: string[];
+  /** Requests, not grants. An installing organization decides what to allow. */
+  requiredPermissions: AgentPermission[];
+  resourceLimits: ResourceLimits;
+  securityPolicy: SecurityPolicy;
+}
+
+export interface AgentVersion {
+  id: ID;
+  agentId: ID;
+  version: string;
+  status: VersionStatus;
+  riskLevel: RiskLevel;
+  riskScore: number;
+  changelog: string[];
+  manifest: AgentManifest;
+  createdAt: ISODate;
+  publishedAt: ISODate | null;
+  deprecatedAt: ISODate | null;
+  createdBy: string;
+}
+
+/** Invented popularity numbers, present only in demo mode. */
+export interface DemoListingStats {
+  rating: number;
+  ratingCount: number;
+  usageCount: number;
+  securityRating: number;
+}
+
 export interface MarketplaceListing {
+  /** The published version's id: a listing is a version, not an agent. */
   id: ID;
   agentId: ID;
   name: string;
   summary: string;
   category: AgentCategory;
   tags: string[];
+  version: string;
   publisher: string;
-  verified: boolean;
-  /** Demo security rating 0–100 (higher is safer). Not a real scan result. */
-  securityRating: number;
+  verification: VerificationStatus;
+  visibility: Visibility;
   riskLevel: RiskLevel;
-  /** Demo rating, 0–5. */
-  rating: number;
-  ratingCount: number;
-  /** Demo usage count. Not real installs or users. */
-  demoUsageCount: number;
+  riskScore: number;
+  tools: string[];
   publishedAt: ISODate;
-  popular: boolean;
+  installed: boolean;
+  installationId: ID | null;
+  /** True when the listing was published by your own organization. */
+  own: boolean;
+  demoStats?: DemoListingStats;
+}
+
+export interface MarketplaceListingDetail extends MarketplaceListing {
+  manifest: AgentManifest;
+  changelog: string[];
+}
+
+/** One capability an organization allows an installed agent to use. */
+export type PermissionGrant = AgentPermission;
+
+export type InstallationStatus = 'active' | 'suspended';
+
+export interface Installation {
+  id: ID;
+  agentId: ID;
+  agentVersionId: ID;
+  agentName: string;
+  publisher: string;
+  version: string;
+  status: InstallationStatus;
+  grants: PermissionGrant[];
+  riskLevel: RiskLevel;
+  riskScore: number;
+  note: string | null;
+  installedBy: string;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+  /** Manifest tools whose capability was not granted: they cannot work. */
+  unusableTools: string[];
+  updateAvailable: boolean;
+}
+
+export interface InstallationDetail extends Installation {
+  manifest: AgentManifest;
 }
 
 export type ExecutionStatus =

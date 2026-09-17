@@ -4,14 +4,16 @@ import { createDemoServices } from '../demo/createDemoServices';
 import { httpAgentService } from './agentApi';
 import { httpAuthService, httpMemberService } from './authApi';
 import { httpExecutionService } from './executionApi';
+import { httpInstallationService, httpMarketplaceService } from './registryApi';
 import { fetchBackendHealth } from './systemApi';
 
 /**
  * API mode.
  *
- * The backend implements identity, agents and executions. Marketplace,
- * security and analytics still come from the demo services, and the UI says
- * so: `liveResources` is the single source of truth for that claim.
+ * The backend implements identity, agents, executions and the registry
+ * (versions, marketplace listings and installations). Security and analytics
+ * still come from the demo services, and the UI says so: `liveResources` is
+ * the single source of truth for that claim.
  */
 function createSystemService(demo: SystemService): SystemService {
   return {
@@ -47,11 +49,20 @@ export function createHttpServices(): Services {
   return {
     ...demo,
     dataSource: 'api',
-    liveResources: ['agents', 'executions', 'dashboard', 'members'],
+    liveResources: [
+      'agents',
+      'executions',
+      'dashboard',
+      'members',
+      'marketplace',
+      'installations',
+    ],
     agents: httpAgentService,
     executions: httpExecutionService,
     system: createSystemService(demo.system),
     auth: httpAuthService,
     members: httpMemberService,
+    marketplace: httpMarketplaceService,
+    installations: httpInstallationService,
   };
 }

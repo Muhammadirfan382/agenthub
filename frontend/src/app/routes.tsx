@@ -12,6 +12,7 @@ const AgentDetailPage = lazy(() => import('@/features/agents/AgentDetailPage'));
 const CreateAgentPage = lazy(() => import('@/features/agents/CreateAgentPage'));
 const EditAgentPage = lazy(() => import('@/features/agents/EditAgentPage'));
 const MarketplacePage = lazy(() => import('@/features/marketplace/MarketplacePage'));
+const MarketplaceListingPage = lazy(() => import('@/features/marketplace/MarketplaceListingPage'));
 const ExecutionsPage = lazy(() => import('@/features/executions/ExecutionsPage'));
 const ExecutionDetailPage = lazy(() => import('@/features/executions/ExecutionDetailPage'));
 const SecurityPage = lazy(() => import('@/features/security/SecurityPage'));
@@ -47,6 +48,7 @@ export const routes: RouteObject[] = [
           { path: 'agents/:id', element: <AgentDetailPage /> },
           { path: 'agents/:id/edit', element: <EditAgentPage /> },
           { path: 'marketplace', element: <MarketplacePage /> },
+          { path: 'marketplace/:id', element: <MarketplaceListingPage /> },
           { path: 'executions', element: <ExecutionsPage /> },
           { path: 'executions/:id', element: <ExecutionDetailPage /> },
           { path: 'security', element: <SecurityPage /> },

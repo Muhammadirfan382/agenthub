@@ -15,6 +15,7 @@ const agent: Agent = {
   version: '1.0.0',
   status: 'active',
   verification: 'verified',
+  visibility: 'private',
   riskLevel: 'medium',
   riskScore: 42,
   creator: { id: 'usr_demo_current', name: 'Demo User' },
@@ -35,7 +36,6 @@ const agent: Agent = {
     approvalRequiredFor: ['high', 'critical'],
     auditLogging: true,
   },
-  versions: [{ version: '1.0.0', releasedAt: '2026-09-01T10:00:00Z', status: 'current', changes: ['First release'] }],
   securityChecks: [{ id: 'chk_permissions', name: 'Permission review', status: 'not_run', detail: 'Not run yet.' }],
 };
 
@@ -180,7 +180,14 @@ describe('api mode services', () => {
     const services = createHttpServices();
 
     expect(services.dataSource).toBe('api');
-    expect(services.liveResources).toEqual(['agents', 'executions', 'dashboard', 'members']);
+    expect(services.liveResources).toEqual([
+      'agents',
+      'executions',
+      'dashboard',
+      'members',
+      'marketplace',
+      'installations',
+    ]);
   });
 
   it('counts the dashboard from live agents and executions', async () => {

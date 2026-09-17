@@ -98,6 +98,10 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
   allow-lists, status transitions and risk scores are decided by the backend.
   Requesting an execution records a queued row; nothing runs.
 - API docs (`/api/docs`, `/api/openapi.json`) only when `ENVIRONMENT=development`.
+- Agent registry (Phase 4): immutable published manifests, marketplace
+  listings governed by a visibility setting, and installations that record what
+  an organization granted - never more than the manifest requested, and nothing
+  by default.
 - Authentication and authorization (Phase 3): password sign-in with scrypt,
   opaque server-side sessions in HttpOnly cookies, CSRF tokens on every unsafe
   request, sign-in throttling, and a role matrix (viewer < member < admin <
@@ -115,7 +119,6 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 - Rate limiting and CORS configuration for a separate frontend origin.
 - MFA and SSO, password reset by email, and an audit trail of security-relevant
   decisions.
-- Agent registry, installation and permission-grant APIs (Phase 4).
 - Execution orchestration APIs with streaming status updates (Phase 5).
 
 ---
@@ -124,8 +127,9 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 ### Current implementation
 
-- `organizations`, `users`, `memberships`, `sessions`, `agents` and `executions`
-  tables, created by Alembic migrations in `database/migrations/versions/`.
+- `organizations`, `users`, `memberships`, `sessions`, `agents`,
+  `agent_versions`, `installations` and `executions` tables, created by Alembic
+  migrations in `database/migrations/versions/`.
 - Passwords are scrypt hashes; session and CSRF tokens are stored only as
   SHA-256 fingerprints. Sessions record no IP address or user agent.
 - Configuration documents (model, tools, permissions, limits, policy, versions,

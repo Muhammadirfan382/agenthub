@@ -14,7 +14,10 @@ export type PermissionAction =
   | 'agent:update'
   | 'agent:delete'
   | 'agent:execute'
+  | 'agent:publish'
   | 'execution:read'
+  | 'installation:read'
+  | 'installation:manage'
   | 'member:read'
   | 'member:manage'
   | 'organization:manage';
@@ -25,16 +28,24 @@ const MINIMUM_ROLE: Record<PermissionAction, Role> = {
   'agent:read': 'viewer',
   'execution:read': 'viewer',
   'member:read': 'viewer',
+  'installation:read': 'viewer',
   'agent:create': 'member',
   'agent:update': 'admin',
   'agent:delete': 'admin',
   'agent:execute': 'admin',
+  'agent:publish': 'admin',
   'member:manage': 'admin',
+  'installation:manage': 'admin',
   'organization:manage': 'owner',
 };
 
 /** Actions a member may also perform on an agent they own. */
-const OWNER_ACTIONS: readonly PermissionAction[] = ['agent:update', 'agent:delete', 'agent:execute'];
+const OWNER_ACTIONS: readonly PermissionAction[] = [
+  'agent:update',
+  'agent:delete',
+  'agent:execute',
+  'agent:publish',
+];
 
 export function hasRole(role: Role, minimum: Role): boolean {
   return RANK[role] >= RANK[minimum];

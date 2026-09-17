@@ -11,7 +11,7 @@ designed in detail when it begins.
 | 1 | Frontend | ✅ Complete (demonstration data; no backend integration) |
 | 2 | Backend | ✅ Complete (agents and executions persisted; no auth) |
 | 3 | Authentication / RBAC | ✅ Complete (password sign-in, sessions, roles) |
-| 4 | Agent registry | ⏳ Not started |
+| 4 | Agent registry | ✅ Complete (manifests, versions, marketplace, installs) |
 | 5 | Agent runtime | ⏳ Not started |
 | 6 | Docker sandbox | ⏳ Not started |
 | 7 | AI/LLM integration | ⏳ Not started |
@@ -92,6 +92,17 @@ exists yet — and so are password reset and email verification.
   model requirements, resource limits.
 - Versions, publishing states, marketplace listing and search.
 - Installation into an organization with explicit, scoped permission grants.
+
+**Delivered:** immutable published versions carrying the full manifest;
+`private` / `organization` / `public` visibility with the marketplace listing
+only the newest published version; search, category, tag and verified filters;
+and installations whose grants start denied, can never exceed or weaken what the
+manifest asked for, and report the tools they leave unusable. See
+[BACKEND.md](BACKEND.md) §5.
+
+**Deliberately not in this phase:** enforcing a grant at runtime (nothing runs
+yet), upgrading an installation to a newer version in one click, and real
+verification - the verification label is stored, not earned.
 
 ## Phase 5: Agent runtime
 

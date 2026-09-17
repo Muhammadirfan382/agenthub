@@ -7,7 +7,7 @@
  */
 export { demoAgents } from './agents';
 export { buildDemoExecutionDetail, demoExecutions } from './executions';
-export { demoMarketplaceListings } from './marketplace';
+export { demoInstallations, demoMarketplaceListings } from './marketplace';
 export { demoMembers, demoOrganization, demoPeople, demoUser } from './people';
 export { demoComponentStatus, demoExecutionsPerDay, demoTokensPerDay } from './platform';
 export { demoPolicies, demoSecurityEvents } from './security';

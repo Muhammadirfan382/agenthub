@@ -10,7 +10,17 @@ export const queryKeys = {
   marketplace: {
     all: ['marketplace'] as const,
     list: (params: MarketplaceParams) => ['marketplace', 'list', params] as const,
+    detail: (id: string) => ['marketplace', 'detail', id] as const,
     tags: ['marketplace', 'tags'] as const,
+  },
+  installations: {
+    all: ['installations'] as const,
+    list: ['installations', 'list'] as const,
+    detail: (id: string) => ['installations', 'detail', id] as const,
+  },
+  versions: {
+    all: ['versions'] as const,
+    list: (agentId: string) => ['versions', 'list', agentId] as const,
   },
   executions: {
     all: ['executions'] as const,

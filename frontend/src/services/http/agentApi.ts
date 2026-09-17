@@ -1,7 +1,13 @@
-import type { AgentDraft, AgentListParams, AgentService } from '@/services/contracts';
-import type { Agent, AgentStatus, Execution, ID } from '@/types/domain';
+import type {
+  AgentDraft,
+  AgentListParams,
+  AgentService,
+  PublishInput,
+} from '@/services/contracts';
+import type { Agent, AgentStatus, AgentVersion, Execution, ID, Visibility } from '@/types/domain';
 import { apiRequest, apiRequestVoid } from './client';
 import { orNull } from './orNull';
+import { fetchVersions, publishVersion, setAgentVisibility } from './registryApi';
 import { AgentSchema, ExecutionSchema, pageSchema } from './schemas';
 
 /**
@@ -53,6 +59,18 @@ export const httpAgentService: AgentService = {
       method: 'PATCH',
       body: { status },
     });
+  },
+
+  versions(id: ID): Promise<AgentVersion[]> {
+    return fetchVersions(id);
+  },
+
+  publish(id: ID, input: PublishInput): Promise<AgentVersion> {
+    return publishVersion(id, input);
+  },
+
+  setVisibility(id: ID, visibility: Visibility): Promise<Agent> {
+    return setAgentVisibility(id, visibility);
   },
 
   requestExecution(id: ID): Promise<Execution> {

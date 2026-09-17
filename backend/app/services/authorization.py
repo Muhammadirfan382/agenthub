@@ -18,7 +18,10 @@ Action = Literal[
     "agent:update",
     "agent:delete",
     "agent:execute",
+    "agent:publish",
     "execution:read",
+    "installation:read",
+    "installation:manage",
     "member:read",
     "member:manage",
     "organization:manage",
@@ -29,23 +32,32 @@ MINIMUM_ROLE: dict[Action, Role] = {
     "agent:read": "viewer",
     "execution:read": "viewer",
     "member:read": "viewer",
+    "installation:read": "viewer",
     "agent:create": "member",
     "agent:update": "admin",
     "agent:delete": "admin",
     "agent:execute": "admin",
+    "agent:publish": "admin",
     "member:manage": "admin",
+    # Installing grants another organization's agent access to this one's work,
+    # so it stays with administrators even though reading is open to everyone.
+    "installation:manage": "admin",
     "organization:manage": "owner",
 }
 
 #: Actions a member may also perform on an agent they own.
-OWNER_ACTIONS: frozenset[Action] = frozenset({"agent:update", "agent:delete", "agent:execute"})
+OWNER_ACTIONS: frozenset[Action] = frozenset(
+    {"agent:update", "agent:delete", "agent:execute", "agent:publish"}
+)
 
 _MESSAGES: dict[Action, str] = {
     "agent:create": "Your role does not allow creating agents.",
     "agent:update": "You can only change agents you own.",
     "agent:delete": "You can only delete agents you own.",
     "agent:execute": "You can only run agents you own.",
+    "agent:publish": "You can only publish agents you own.",
     "member:manage": "Only administrators and owners can manage members.",
+    "installation:manage": "Only administrators and owners can install or change agents.",
     "organization:manage": "Only the organization owner can do this.",
 }
 

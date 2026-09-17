@@ -1,8 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AgentDraft, AgentListParams } from '@/services/contracts';
+import type { AgentDraft, AgentListParams, PublishInput } from '@/services/contracts';
 import { queryKeys } from '@/services/queryKeys';
 import { useServices } from '@/services/ServicesContext';
-import type { AgentStatus } from '@/types/domain';
+import type { AgentStatus, Visibility } from '@/types/domain';
 
 export function useAgents(params: AgentListParams = {}) {
   const { agents } = useServices();
@@ -66,5 +66,39 @@ export function useRequestExecution() {
         queryClient.invalidateQueries({ queryKey: queryKeys.executions.all }),
         queryClient.invalidateQueries({ queryKey: queryKeys.system.summary }),
       ]),
+  });
+}
+
+export function useAgentVersions(id: string) {
+  const { agents } = useServices();
+  return useQuery({ queryKey: queryKeys.versions.list(id), queryFn: () => agents.versions(id) });
+}
+
+/** Publishing changes what the marketplace shows, so both caches are dropped. */
+function useInvalidateRegistry(id: string) {
+  const queryClient = useQueryClient();
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.versions.list(id) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.marketplace.all }),
+    ]);
+}
+
+export function usePublishAgent(id: string) {
+  const { agents } = useServices();
+  const invalidate = useInvalidateRegistry(id);
+  return useMutation({
+    mutationFn: (input: PublishInput) => agents.publish(id, input),
+    onSuccess: invalidate,
+  });
+}
+
+export function useSetAgentVisibility(id: string) {
+  const { agents } = useServices();
+  const invalidate = useInvalidateRegistry(id);
+  return useMutation({
+    mutationFn: (visibility: Visibility) => agents.setVisibility(id, visibility),
+    onSuccess: invalidate,
   });
 }

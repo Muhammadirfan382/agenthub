@@ -2,8 +2,8 @@
 
 FastAPI service for agents and executions, backed by SQLAlchemy and Alembic.
 
-**Status (Phase 3).** Persists organizations, users, memberships, sessions,
-agents and executions. Every endpoint except the health check and sign-in
+**Status (Phase 4).** Persists organizations, users, memberships, sessions,
+agents, published versions, marketplace listings, installations and executions. Every endpoint except the health check and sign-in
 requires a session, and every action is checked against a role. There is still
 **no agent runtime**: requesting an execution records a queued row and nothing
 runs. Treat it as pre-release software — it has never been deployed, audited or
@@ -17,7 +17,8 @@ run against real data.
 backend/
 ├── app/
 │   ├── api/deps.py         AuthDep: session lookup and the CSRF check
-│   ├── api/v1/             Routers: health, auth, agents, executions, members
+│   ├── api/v1/             Routers: health, auth, agents, executions, members,
+│   │                       registry (versions, marketplace, installations)
 │   ├── core/               config, errors, logging, middleware, pagination,
 │   │                       rate_limit, security (hashing), time
 │   ├── db/                 base metadata, engine/session, models/
@@ -83,6 +84,19 @@ stays snake_case (`CamelModel` generates the aliases).
 | `PATCH` | `/agents/{id}/status` | owner of the agent, or admin | `active`, `paused`, `draft`, `disabled`. |
 | `DELETE` | `/agents/{id}` | owner of the agent, or admin | 204. Cascades to that agent's executions. |
 | `POST` | `/agents/{id}/executions` | owner of the agent, or admin | 202. Records a `QUEUED` execution. Nothing runs. |
+| `GET` | `/agents/{id}/versions` | viewer | Published manifests, newest first. |
+| `POST` | `/agents/{id}/versions` | owner of the agent, or admin | Publishes the current configuration. 409 if that version exists. |
+| `GET` | `/agents/{id}/versions/{versionId}` | viewer | One frozen manifest. |
+| `PATCH` | `/agents/{id}/versions/{versionId}` | owner of the agent, or admin | Deprecate or restore. |
+| `PATCH` | `/agents/{id}/visibility` | owner of the agent, or admin | `private`, `organization` or `public`. |
+| `GET` | `/marketplace` | viewer | `search`, `category`, `tag`, `verified`. Newest published version per agent. |
+| `GET` | `/marketplace/tags` | viewer | Tags in use by visible listings. |
+| `GET` | `/marketplace/{versionId}` | viewer | Listing with its manifest. 404 when not listed for you. |
+| `GET` | `/installations` | viewer | Agents installed by your organization. |
+| `POST` | `/installations` | admin | Installs with explicit grants. |
+| `GET` | `/installations/{id}` | viewer | One installation, with the manifest it was granted against. |
+| `PATCH` | `/installations/{id}` | admin | Change grants, suspend or resume. |
+| `DELETE` | `/installations/{id}` | admin | Uninstall. |
 | `GET` | `/executions` | viewer | `status`, `agentId`, `search`, `limit`, `offset`. |
 | `GET` | `/executions/{id}` | viewer | Timeline, logs and tool calls are empty until a runtime records them. |
 
@@ -162,7 +176,50 @@ organization always keeps at least one owner.
 every repository query filters on it. An id belonging to another organization
 answers 404, not 403, so ids cannot be probed.
 
-## 5. Domain rules
+## 5. The registry
+
+**A manifest is a request; an installation is a grant.** Keeping those two apart
+is the whole point of this phase.
+
+**Publishing** (`POST /agents/{id}/versions`) freezes the agent's current
+configuration - model, tools, required permissions, limits, policy - into an
+immutable `agent_versions` row. Editing the agent afterwards changes what the
+*next* version will say, never what an installer already agreed to. A version
+number can only be published once, and a rejected agent or one with a failed
+security check cannot be published at all.
+
+**Visibility** decides who sees a published agent in the marketplace:
+
+| Visibility | Who can see the listing |
+| --- | --- |
+| `private` (default) | Nobody. It is not listed, not even to its own organization. |
+| `organization` | Members of the publishing organization. |
+| `public` | Every organization on this AgentHub. |
+
+An agent must have a published version before it can leave `private`, and the
+marketplace only ever lists the newest published, non-deprecated version of each
+agent. Deprecating that version removes the listing.
+
+**Installing** (`POST /installations`) records what the installing organization
+allows. The rules are enforced server-side, in `registry_service.normalise_grants`:
+
+- Every capability starts **denied**; anything left out of the request stays denied.
+- A grant may never exceed the level the manifest asked for.
+- An approval requirement set by the publisher cannot be removed, and any grant
+  that works out as critical risk must require approval.
+- Anything granted needs a scope in words, so the limit is on the record.
+- Risk is recomputed from the grants; a client cannot claim a lower risk.
+
+Installing is allowed to grant nothing. The response then lists `unusableTools`:
+the manifest's tools whose capability was denied, so the cost of granting
+nothing is visible rather than silent.
+
+An organization cannot install its own agent, and can install a given agent
+once; changing your mind means updating the installation, which re-runs the same
+validation. `updateAvailable` says whether the publisher has released a newer
+version - upgrading is a deliberate act, because a new manifest may ask for more.
+
+## 6. Domain rules
 
 The backend is authoritative; the frontend's Zod rules only improve the form.
 
@@ -177,8 +234,11 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   verification is not `rejected`.
 - Executions can only be requested for an `active` agent.
 
-## 6. Database
+## 7. Database
 
+- **Registry tables:** `agent_versions` (immutable manifests) and
+  `installations` (one row per organization per installed agent, holding the
+  grants). Both are organization-scoped like everything else.
 - **Identity tables:** `organizations`, `users`, `memberships`, `sessions`.
   Passwords and tokens are stored only as hashes, and sessions record no IP
   address or user agent.
@@ -224,7 +284,7 @@ cd backend
 Four fictional agents and three execution records, safe to run twice. The
 execution rows are records of requests, not evidence that anything ran.
 
-## 7. Testing
+## 8. Testing
 
 ```powershell
 cd backend
@@ -241,12 +301,20 @@ ids, security headers, validation rules, status transitions, cascade deletion an
 the risk model - and, for this phase, sign-in and throttling, session expiry and
 revocation, CSRF rejection, the role matrix, ownership rules, membership rules,
 cross-organization isolation, and a deny-by-default check that walks the OpenAPI
-schema and asserts every route refuses an unauthenticated caller. PostgreSQL is covered in CI by applying,
+schema and asserts every route refuses an unauthenticated caller.
+
+The registry adds its own: that a published manifest does not change when the
+agent is edited, that private agents are never listed, that only the newest
+published version appears, that a grant cannot exceed or weaken what the
+manifest asked for, that installing grants nothing by default, and that
+installations never cross organizations. PostgreSQL is covered in CI by applying,
 rolling back and reapplying the migrations against a real server.
 
-## 8. Security status
+## 9. Security status
 
-Implemented: password authentication with scrypt, revocable server-side sessions
+Implemented: immutable published manifests, deny-by-default permission grants
+that can never exceed what a manifest requested, password authentication with
+scrypt, revocable server-side sessions
 in HttpOnly cookies, CSRF protection on every state-changing request, sign-in
 throttling, role-based authorization on every endpoint, organization isolation in
 every query, strict input validation, server-derived risk, a uniform error
@@ -259,5 +327,7 @@ throughout.
 delivery and therefore password reset and email verification, an audit log, CORS
 configuration for a separate frontend origin, shared-store rate limiting for
 multiple workers, agent execution and sandboxing (Phases 5-6), and real security
-scanning (Phase 8). Nothing here has been penetration-tested or reviewed by
+scanning (Phase 8). Nothing enforces a grant at runtime yet, because nothing
+runs: grants are recorded configuration until the runtime exists. Verification
+is a stored label, not the result of a review anyone performed. Nothing here has been penetration-tested or reviewed by
 anyone outside this repository.

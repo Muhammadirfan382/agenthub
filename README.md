@@ -27,9 +27,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 1 | Frontend and UI (demonstration data) | ✅ Complete |
 | 2 | Backend: API, PostgreSQL, migrations | ✅ Complete |
 | 3 | Authentication and RBAC | ✅ Complete |
-| 4–10 | Registry, runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
+| 4 | Agent registry: manifests, versions, marketplace, installs | ✅ Complete |
+| 5–10 | Runtime, sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–3):**
+**What exists today (Phases 0–4):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -42,13 +43,15 @@ aims to make that safe to do inside an organization by combining two things:
   - Routers → services → repositories, Alembic migrations, SQLite for local development and PostgreSQL for production.
   - A uniform `{code, message, details}` error envelope, request ids, security headers, pagination and server-side validation and risk scoring.
   - Password sign-in, server-side sessions in HttpOnly cookies, CSRF protection, sign-in throttling, organizations with memberships, and four roles (viewer, member, admin, owner) enforced on every endpoint.
-  - **No agent runtime**: requesting an execution records a queued row and nothing else.
+  - An agent registry: publishing freezes a manifest as an immutable version, visibility decides who sees it in the marketplace, and installing it into another organization grants only what that organization chooses - never more than the manifest asked for, and nothing by default.
+  - **No agent runtime**: requesting an execution records a queued row and nothing else, and nothing enforces a grant while nothing runs.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
-email verification), an audit log, a real agent registry, agent execution,
-sandboxing, LLM integration, security scanning, monitoring and deployment.
+email verification), an audit log, agent execution, sandboxing, LLM integration,
+real security scanning (the verification label is stored, not earned), monitoring
+and deployment.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
 demonstration data.
@@ -213,7 +216,7 @@ AgentHub/
 | 1 | Frontend: application shell, routing, design system, UI against a clearly labelled mock API |
 | 2 | Backend: API structure, PostgreSQL, migrations, error handling ✅ |
 | 3 | Authentication / RBAC: identity, sessions, roles, server-side authorization ✅ |
-| 4 | Agent registry: agent manifests, versions, permissions model, marketplace data |
+| 4 | Agent registry: agent manifests, versions, permissions model, marketplace data ✅ |
 | 5 | Agent runtime: execution lifecycle, orchestration, approvals |
 | 6 | Docker sandbox: isolated, resource-limited, credential-free execution |
 | 7 | AI/LLM integration: provider abstraction, model gateway, tool calling |

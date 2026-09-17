@@ -21,7 +21,11 @@ CapabilityKey = Literal[
     "email_send",
 ]
 PermissionLevel = Literal["denied", "read_only", "restricted", "allowed"]
-VersionStatus = Literal["current", "previous", "deprecated", "draft"]
+# A published version is immutable; deprecated hides it from the marketplace.
+VersionStatus = Literal["draft", "published", "deprecated"]
+# How widely an agent is listed. Private is the default.
+Visibility = Literal["private", "organization", "public"]
+InstallationStatus = Literal["active", "suspended"]
 SecurityCheckStatus = Literal["passed", "warning", "failed", "not_run"]
 SandboxMode = Literal["strict", "standard"]
 NetworkEgress = Literal["none", "allow_list"]
@@ -45,6 +49,8 @@ UserStatus = Literal["active", "disabled"]
 RISK_LEVELS: tuple[RiskLevel, ...] = get_args(RiskLevel)
 CAPABILITY_KEYS: tuple[CapabilityKey, ...] = get_args(CapabilityKey)
 EXECUTION_STATUSES: tuple[ExecutionStatus, ...] = get_args(ExecutionStatus)
+PERMISSION_LEVELS: tuple[PermissionLevel, ...] = get_args(PermissionLevel)
+LEVEL_RANK: dict[str, int] = {level: index for index, level in enumerate(PERMISSION_LEVELS)}
 
 RISK_RANK: dict[str, int] = {level: index for index, level in enumerate(RISK_LEVELS)}
 

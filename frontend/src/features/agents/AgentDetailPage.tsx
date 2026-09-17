@@ -1,4 +1,4 @@
-import { Ellipsis, Pencil, Play, Power, Rocket, SearchX, Trash2 } from 'lucide-react';
+import { Ellipsis, Pencil, Play, Power, Rocket, SearchX, Trash2, Upload } from 'lucide-react';
 import { useId, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { EmptyState } from '@/components/feedback/EmptyState';
@@ -13,13 +13,14 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DropdownMenu } from '@/components/ui/DropdownMenu';
 import { TabPanel, Tabs } from '@/components/ui/Tabs';
 import { toast } from '@/stores/toastStore';
-import type { Agent } from '@/types/domain';
+import { type Agent, VISIBILITY_LABELS } from '@/types/domain';
 import { useAgent } from './api';
 import { AgentCapabilitiesTab } from './detail/AgentCapabilitiesTab';
 import { AgentExecutionsTab } from './detail/AgentExecutionsTab';
 import { AgentOverviewTab } from './detail/AgentOverviewTab';
 import { AgentSecurityTab } from './detail/AgentSecurityTab';
 import { AgentVersionsTab } from './detail/AgentVersionsTab';
+import { PublishAgentDialog } from './components/PublishAgentDialog';
 import { useAgentPermissions } from './permissions';
 import { useAgentActions } from './useAgentActions';
 
@@ -65,6 +66,7 @@ function AgentDetail({ agent }: { agent: Agent }) {
   const [deployOpen, setDeployOpen] = useState(false);
   const actions = useAgentActions({ onDeleted: () => navigate('/agents') });
   const permissions = useAgentPermissions();
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const requestedTab = searchParams.get('tab');
   const tab: TabId = TABS.some((t) => t.id === requestedTab) ? (requestedTab as TabId) : 'overview';
@@ -88,6 +90,9 @@ function AgentDetail({ agent }: { agent: Agent }) {
             <RiskBadge level={agent.riskLevel} />
             <Badge>v{agent.version}</Badge>
             <Badge>{CATEGORY_LABELS[agent.category]}</Badge>
+            <Badge tone={agent.visibility === 'private' ? 'neutral' : 'brand'}>
+              {VISIBILITY_LABELS[agent.visibility]}
+            </Badge>
           </>
         }
         actions={
@@ -100,6 +105,10 @@ function AgentDetail({ agent }: { agent: Agent }) {
             )}
             {permissions.canUpdate(agent) && (
               <>
+                <Button variant="secondary" onClick={() => setPublishOpen(true)}>
+                  <Upload aria-hidden="true" className="size-4" />
+                  Publish
+                </Button>
                 <LinkButton to={`/agents/${agent.id}/edit`} variant="secondary">
                   <Pencil aria-hidden="true" className="size-4" />
                   Edit
@@ -149,6 +158,7 @@ function AgentDetail({ agent }: { agent: Agent }) {
         onCancel={() => setDeployOpen(false)}
       />
       {actions.dialogs}
+      <PublishAgentDialog agent={agent} open={publishOpen} onClose={() => setPublishOpen(false)} />
     </>
   );
 }

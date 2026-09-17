@@ -7,7 +7,15 @@ what the schemas expect, so they validate directly.
 from typing import TYPE_CHECKING
 
 from app.core.time import ensure_utc
-from app.db.models import Agent, Execution, Membership, Organization, User
+from app.db.models import (
+    Agent,
+    AgentVersion,
+    Execution,
+    Installation,
+    Membership,
+    Organization,
+    User,
+)
 from app.schemas.agent import AgentRead
 from app.schemas.auth import (
     MemberRead,
@@ -17,6 +25,14 @@ from app.schemas.auth import (
     UserRead,
 )
 from app.schemas.execution import ExecutionDetailRead, ExecutionRead
+from app.schemas.registry import (
+    AgentVersionRead,
+    InstallationDetail,
+    InstallationRead,
+    MarketplaceListing,
+    MarketplaceListingDetail,
+)
+from app.services import registry_service
 
 if TYPE_CHECKING:
     from app.services.auth_service import AuthContext
@@ -33,6 +49,7 @@ def to_agent_read(agent: Agent) -> AgentRead:
             "version": agent.version,
             "status": agent.status,
             "verification": agent.verification,
+            "visibility": agent.visibility,
             "riskLevel": agent.risk_level,
             "riskScore": agent.risk_score,
             "creator": {"id": agent.creator_id, "name": agent.creator_name},
@@ -47,7 +64,6 @@ def to_agent_read(agent: Agent) -> AgentRead:
             "permissions": agent.permissions,
             "resourceLimits": agent.resource_limits,
             "securityPolicy": agent.security_policy,
-            "versions": agent.versions,
             "securityChecks": agent.security_checks,
         }
     )
@@ -138,3 +154,118 @@ def to_session_read(
             "expiresAt": ensure_utc(context.session.expires_at),
         }
     )
+
+
+def to_version_read(version: AgentVersion) -> AgentVersionRead:
+    return AgentVersionRead.model_validate(
+        {
+            "id": version.id,
+            "agentId": version.agent_id,
+            "version": version.version,
+            "status": version.status,
+            "riskLevel": version.risk_level,
+            "riskScore": version.risk_score,
+            "changelog": version.changelog,
+            "manifest": version.manifest,
+            "createdAt": ensure_utc(version.created_at),
+            "publishedAt": ensure_utc(version.published_at) if version.published_at else None,
+            "deprecatedAt": ensure_utc(version.deprecated_at) if version.deprecated_at else None,
+            "createdBy": version.created_by_name,
+        }
+    )
+
+
+def _listing_payload(
+    version: AgentVersion,
+    agent: Agent,
+    publisher: Organization,
+    installation: Installation | None,
+    organization_id: str,
+) -> dict[str, object]:
+    manifest = version.manifest
+    return {
+        "id": version.id,
+        "agentId": agent.id,
+        "name": str(manifest.get("name", agent.name)),
+        "summary": str(manifest.get("description", agent.description)),
+        "category": manifest.get("category", agent.category),
+        "tags": manifest.get("tags", agent.tags),
+        "version": version.version,
+        "publisher": publisher.name,
+        "verification": agent.verification,
+        "visibility": agent.visibility,
+        "riskLevel": version.risk_level,
+        "riskScore": version.risk_score,
+        "tools": manifest.get("tools", []),
+        "publishedAt": ensure_utc(version.published_at) if version.published_at else None,
+        "installed": installation is not None,
+        "installationId": installation.id if installation else None,
+        "own": agent.organization_id == organization_id,
+    }
+
+
+def to_listing(
+    version: AgentVersion,
+    agent: Agent,
+    publisher: Organization,
+    installation: Installation | None,
+    organization_id: str,
+) -> MarketplaceListing:
+    return MarketplaceListing.model_validate(
+        _listing_payload(version, agent, publisher, installation, organization_id)
+    )
+
+
+def to_listing_detail(
+    version: AgentVersion,
+    agent: Agent,
+    publisher: Organization,
+    installation: Installation | None,
+    organization_id: str,
+) -> MarketplaceListingDetail:
+    payload = _listing_payload(version, agent, publisher, installation, organization_id)
+    payload["manifest"] = version.manifest
+    payload["changelog"] = version.changelog
+    return MarketplaceListingDetail.model_validate(payload)
+
+
+def _installation_payload(
+    installation: Installation, version: AgentVersion | None, update_available: bool
+) -> dict[str, object]:
+    manifest = version.manifest if version else {}
+    return {
+        "id": installation.id,
+        "agentId": installation.agent_id,
+        "agentVersionId": installation.agent_version_id,
+        "agentName": installation.agent_name,
+        "publisher": installation.publisher_name,
+        "version": str(manifest.get("version", "")) if version else "",
+        "status": installation.status,
+        "grants": installation.grants,
+        "riskLevel": installation.risk_level,
+        "riskScore": installation.risk_score,
+        "note": installation.note,
+        "installedBy": installation.installed_by_name,
+        "createdAt": ensure_utc(installation.created_at),
+        "updatedAt": ensure_utc(installation.updated_at),
+        "unusableTools": registry_service.unusable_tools(manifest, installation.grants)
+        if version
+        else [],
+        "updateAvailable": update_available,
+    }
+
+
+def to_installation_read(
+    installation: Installation, version: AgentVersion | None, *, update_available: bool = False
+) -> InstallationRead:
+    return InstallationRead.model_validate(
+        _installation_payload(installation, version, update_available)
+    )
+
+
+def to_installation_detail(
+    installation: Installation, version: AgentVersion, *, update_available: bool = False
+) -> InstallationDetail:
+    payload = _installation_payload(installation, version, update_available)
+    payload["manifest"] = version.manifest
+    return InstallationDetail.model_validate(payload)
