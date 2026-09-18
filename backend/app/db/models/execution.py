@@ -1,12 +1,11 @@
 """Execution tables: the run itself and everything it records.
 
-A run carries the runtime that produced it — `sandbox` when a verified
-container was created for it, `simulation` when none was available — and, in
-`sandbox_report`, what that container reported about its own isolation.
-
-Neither runtime executes agent code: the model gateway that would give an agent
-something to do arrives in Phase 7, so a recorded step can never be mistaken
-for work that actually happened.
+A run carries two independent facts about how it was produced: `runtime`
+(`sandbox` when a verified container was created for it, `simulation` when
+none was available) and `mode` (`model` when a real model answered through the
+gateway, `simulated` when no provider was configured). No tool is ever executed
+in this release, so tool calls are recorded as `unavailable`, `denied` or
+`simulated`, never as succeeded.
 """
 
 from datetime import datetime
@@ -39,6 +38,17 @@ class Execution(Base):
     trigger: Mapped[str] = mapped_column(String(16), nullable=False)
     #: What produced this run: `sandbox` (verified container) or `simulation`.
     runtime: Mapped[str] = mapped_column(String(16), nullable=False, default="simulation")
+    #: `model` when a real model answered through the gateway, `simulated` when
+    #: no provider was configured and the scripted plan was recorded instead.
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="simulated")
+    #: The provider:model the run's tier resolved to. Null for simulated runs.
+    model_route: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    #: What the requester asked the agent to do. Untrusted input, sent to the model.
+    input_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Estimated model spend in millionths of a US dollar; null when unpriced.
+    cost_microusd: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: The model conversation, so a paused or reclaimed run resumes where it was.
+    conversation: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument, nullable=True)
 
     requested_by_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     requested_by_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")

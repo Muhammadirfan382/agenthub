@@ -26,6 +26,7 @@ function ExecutionTraceBadge() {
   return live ? <Badge tone="neutral">No trace recorded</Badge> : <DemoBadge label="Demo data · not real-time" />;
 }
 import { ApprovalPanel } from './components/ApprovalPanel';
+import { Conversation } from './components/Conversation';
 import { ExecutionTimeline } from './components/ExecutionTimeline';
 import { LogList } from './components/LogList';
 import { SandboxChecks } from './components/SandboxChecks';
@@ -78,7 +79,24 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
         {execution.runtime === 'sandbox' ? 'Sandbox' : 'Simulation'}
       </Badge>,
     ],
-    ['Model', <span key="model" className="font-mono text-xs">{execution.model}</span>],
+    [
+      'Model',
+      <span key="model" className="flex flex-wrap items-center gap-1.5">
+        <span className="font-mono text-xs">{execution.model}</span>
+        <Badge tone={execution.mode === 'model' ? 'success' : 'neutral'}>
+          {execution.mode === 'model' ? 'Live model' : 'Simulated'}
+        </Badge>
+      </span>,
+    ],
+    ['Route', <span key="route" className="font-mono text-xs break-all">{execution.modelRoute ?? 'None: no model was called'}</span>],
+    [
+      'Estimated cost',
+      execution.estimatedCostUsd === null
+        ? execution.mode === 'model'
+          ? 'Unknown for this model'
+          : 'None'
+        : `$${execution.estimatedCostUsd.toFixed(4)}`,
+    ],
     ['Started', formatDateTime(execution.startedAt)],
     ['Ended', execution.endedAt ? formatDateTime(execution.endedAt) : 'Not finished'],
     ['Duration', formatDuration(execution.durationMs)],
@@ -124,11 +142,7 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
         resource="executions"
         className="mb-6"
         demo="Timeline, logs and tool calls are generated demonstration data. They are not streamed from a running agent."
-        live={
-          execution.runtime === 'sandbox'
-            ? 'A verified, isolated container was created for this run, but nothing executed inside it: there is no model gateway yet, so no agent code, model or tool was actually run.'
-            : 'The runtime orchestrated this run and recorded every step, but executed nothing: no sandbox was available, so no agent code, model or tool was actually run.'
-        }
+        live={liveNotice(execution)}
       />
 
       {execution.error && (
@@ -161,12 +175,33 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
             <CardHeader title="Result" />
             <div className="px-5 py-4 text-sm">
               {execution.result ? (
-                <p className="text-fg">{execution.result}</p>
+                <p className="break-words whitespace-pre-wrap text-fg">{execution.result}</p>
               ) : (
                 <p className="text-fg-muted">
                   {execution.status === 'COMPLETED' ? 'No result was recorded.' : 'No result: the execution has not completed successfully.'}
                 </p>
               )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="Task" description="What the requester asked the agent to do." />
+            <div className="px-5 py-4 text-sm">
+              {execution.input ? (
+                <p className="break-words whitespace-pre-wrap text-fg">{execution.input}</p>
+              ) : (
+                <p className="text-fg-muted">No task was given; the agent worked from its own description.</p>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Conversation"
+              description="Everything said between the model and the platform, as plain text."
+            />
+            <div className="px-5 py-4">
+              <Conversation turns={execution.conversation} />
             </div>
           </Card>
 
@@ -235,4 +270,16 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
       />
     </>
   );
+}
+
+/** What actually happened in this run, in one sentence a reader can trust. */
+function liveNotice(execution: ExecutionDetail): string {
+  const box =
+    execution.runtime === 'sandbox'
+      ? 'A verified, isolated container was created for it, but nothing ran inside it.'
+      : 'No sandbox was available, and nothing ran on the host either.';
+  if (execution.mode === 'model') {
+    return `A real model (${execution.modelRoute ?? 'unknown route'}) answered this run through the model gateway. Tools it asked for were checked against the agent's permissions but never executed. ${box}`;
+  }
+  return `No model provider was configured, so this run was simulated: no model was called and no tool was run. ${box}`;
 }

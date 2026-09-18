@@ -139,6 +139,22 @@ authorization control.
   A 404 on a detail request becomes `null`; other failures raise `ApiError`
   carrying the backend's own `code` and `message`.
 
+### Models (Phase 7)
+
+- **Starting a run** opens a dialog with an optional task, sent to the model as
+  the request. It says plainly that tools are checked but never executed.
+- **The execution page** shows the model tier with *Live model* or *Simulated*,
+  the route, the estimated cost, the task, and the **Conversation**: the
+  request, each model turn, the tools it asked for and what the tool gateway
+  told it. Every word of it is untrusted and rendered as plain text; nothing is
+  interpreted as markup or made clickable.
+- Tool calls allowed by policy show as **Not executed**, never as succeeded.
+- **Settings → Runtime → Model gateway** shows which providers have credentials
+  (never the credentials), each tier's route and whether it is live, the limits,
+  and today's requests, tokens and estimated spend.
+- **Demo mode** reports that no provider is configured and never shows a
+  conversation it did not have.
+
 ### The sandbox (Phase 6)
 
 - **Settings → Runtime → Execution sandbox** shows the configured image and

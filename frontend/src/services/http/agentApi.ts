@@ -73,10 +73,11 @@ export const httpAgentService: AgentService = {
     return setAgentVisibility(id, visibility);
   },
 
-  requestExecution(id: ID): Promise<Execution> {
+  requestExecution(id: ID, input?: string): Promise<Execution> {
+    const task = input?.trim();
     return apiRequest(`/api/v1/agents/${encodeURIComponent(id)}/executions`, ExecutionSchema, {
       method: 'POST',
-      body: { trigger: 'manual' },
+      body: { trigger: 'manual', input: task ? task : null },
     });
   },
 };

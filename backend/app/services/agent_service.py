@@ -196,11 +196,13 @@ async def request_execution(
     trigger: ExecutionTrigger = "manual",
     *,
     context: AuthContext,
+    input_text: str | None = None,
 ) -> Execution:
     """Queues a run for the runtime to pick up.
 
-    The runtime orchestrates but executes nothing: there is no sandbox yet, so
-    the run is recorded by the simulation runtime (see app/runtime/engine.py).
+    The runtime decides when it starts whether a real model drives the run or
+    the scripted plan is recorded (see app/runtime/engine.py). `input_text` is
+    what the requester asked for; it reaches the model as the user's message.
     """
     agent = await _agent_for_change(session, agent_id, context=context, action="agent:execute")
     if agent.status != "active":
@@ -225,6 +227,8 @@ async def request_execution(
         status="QUEUED",
         trigger=trigger,
         runtime=RUNTIME_NAME,
+        mode="simulated",
+        input_text=input_text or None,
         requested_by_id=context.user_id,
         requested_by_name=context.user.name,
         started_at=now,

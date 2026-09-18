@@ -30,9 +30,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 4 | Agent registry: manifests, versions, marketplace, installs | ✅ Complete |
 | 5 | Agent runtime: orchestration, approvals, budgets, kill switch | ✅ Complete |
 | 6 | Docker sandbox: isolated, verified containers per run | ✅ Complete (real-container tests run in CI only) |
-| 7–10 | LLM, security, monitoring, deployment | ⏳ Not started |
+| 7 | AI/LLM: model gateway, Claude and OpenAI adapters, tool gateway | ✅ Complete (no live provider call made; see below) |
+| 8–10 | Security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–6):**
+**What exists today (Phases 0–7):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -48,13 +49,14 @@ aims to make that safe to do inside an organization by combining two things:
   - An agent registry: publishing freezes a manifest as an immutable version, visibility decides who sees it in the marketplace, and installing it into another organization grants only what that organization chooses - never more than the manifest asked for, and nothing by default.
   - An execution runtime that orchestrates runs: a durable queue and worker, per-run budgets for time, tokens and tool calls, pauses for human approval, cancellation, an organization-wide kill switch, and a recorded timeline, logs and tool calls streamed to the UI.
   - A sandbox: before each run the runtime starts an ephemeral, non-root, read-only, capability-free, network-less and resource-limited container, checks 13 isolation guarantees from inside it, records the result on the run, and fails the run if any guarantee does not hold. Without a container runtime, runs are recorded as simulations, or refused when `REQUIRE_SANDBOX=true`.
-  - **Nothing is executed.** No agent code runs, no model is called and no tool is invoked: the model gateway does not exist yet, so nothing runs inside the sandbox and tool calls are recorded as `simulated`, never as succeeded.
+  - A model gateway: with `AGENTHUB_ANTHROPIC_API_KEY` (or `AGENTHUB_OPENAI_API_KEY`) set, a real model answers each run. Agents pick a tier; the deployment routes it to a model. Every request is rate limited, budgeted and metered per organization, and credentials never leave the server.
+  - **No tool is executed.** Tools the model asks for are checked against the agent's grants, a strict schema and human approval, then recorded as not executed: real tools need the egress protection planned for Phase 8. Without a key, runs are simulated and say so.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
-email verification), an audit log, actual agent execution, an egress
-gateway, LLM integration, scheduled triggers, real security scanning (the verification label
+email verification), an audit log, tool execution, an egress
+gateway, scheduled triggers, real security scanning (the verification label
 is stored, not earned), monitoring and deployment.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
@@ -241,8 +243,8 @@ Full descriptions: [docs/ROADMAP.md](docs/ROADMAP.md).
   and never treated as instructions to the platform.
 - **Isolation.** Agent code will run only inside sandboxes with no host access, no
   ambient credentials and limited resources. The sandbox exists and is checked
-  before every run; until the model gateway gives agents something to do,
-  nothing is executed inside it.
+  before every run. Models answer through a gateway outside it, and no tool is
+  executed until egress controls exist.
 - **No secrets in code, Git or the browser.** Configuration comes from the
   environment; real values live outside the repository.
 - **Honesty over appearance.** Placeholder or mocked functionality is labelled as

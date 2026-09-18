@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Field } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Textarea';
 import { toast } from '@/stores/toastStore';
 import type { Agent } from '@/types/domain';
 import { useDeleteAgent, useRequestExecution, useSetAgentStatus } from './api';
@@ -17,16 +19,20 @@ interface Options {
  */
 export function useAgentActions({ onDeleted }: Options = {}) {
   const [pending, setPending] = useState<PendingAction>(null);
+  const [task, setTask] = useState('');
   const execute = useRequestExecution();
   const remove = useDeleteAgent();
   const setStatus = useSetAgentStatus();
 
-  const close = () => setPending(null);
+  const close = () => {
+    setPending(null);
+    setTask('');
+  };
 
   const confirmExecute = (agent: Agent) => {
-    execute.mutate(agent.id, {
+    execute.mutate({ id: agent.id, input: task.trim() || undefined }, {
       onSuccess: (execution) => {
-        toast.success('Execution requested', `${execution.id} is queued. This is a demo: nothing actually runs yet.`);
+        toast.success('Run queued', `${execution.id} is queued. Follow it on the execution page.`);
         close();
       },
       onError: (error) => {
@@ -65,13 +71,26 @@ export function useAgentActions({ onDeleted }: Options = {}) {
     <>
       <ConfirmDialog
         open={pending?.kind === 'execute'}
-        title={pending ? `Execute ${pending.agent.name}?` : 'Execute agent?'}
-        description="The request is queued in this demo session. Real execution, sandboxing and approvals arrive in later phases."
-        confirmLabel="Request execution"
+        title={pending ? `Run ${pending.agent.name}?` : 'Run agent?'}
+        description="A real model answers if one is configured for this agent's tier; otherwise the run is simulated. Tools the model asks for are checked against this agent's permissions but never executed."
+        confirmLabel="Start run"
         pending={execute.isPending}
         onConfirm={() => pending && confirmExecute(pending.agent)}
         onCancel={close}
-      />
+      >
+        <Field label="Task (optional)" hint="Sent to the model as your request. Up to 8,000 characters.">
+          {(control) => (
+            <Textarea
+              {...control}
+              value={task}
+              maxLength={8000}
+              rows={4}
+              onChange={(event) => setTask(event.target.value)}
+              placeholder="Summarise last night's failed logins."
+            />
+          )}
+        </Field>
+      </ConfirmDialog>
       <ConfirmDialog
         open={pending?.kind === 'delete'}
         tone="danger"

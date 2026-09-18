@@ -257,10 +257,17 @@ export function isExecutionFinished(status: ExecutionStatus): boolean {
 
 /**
  * What produced a run: `sandbox` when a verified, isolated container was
- * created for it, `simulation` when none was available. In neither case does
- * agent code execute yet — there is no model gateway to give it anything to do.
+ * created for it, `simulation` when none was available. Nothing executes inside
+ * the container in either case; see `ExecutionMode` for whether a model answered.
  */
 export type ExecutionRuntime = 'simulation' | 'sandbox';
+
+/**
+ * Who drove a run: `model` when a real model answered through the model
+ * gateway, `simulated` when no provider was configured and the scripted plan
+ * was recorded instead.
+ */
+export type ExecutionMode = 'model' | 'simulated';
 
 export interface ExecutionBudget {
   maxRuntimeSeconds: number;
@@ -280,6 +287,11 @@ export interface Execution {
   status: ExecutionStatus;
   trigger: 'manual' | 'schedule' | 'api';
   runtime: ExecutionRuntime;
+  mode: ExecutionMode;
+  /** provider:model the run's tier resolved to; null for simulated runs. */
+  modelRoute: string | null;
+  /** Estimated from published prices; null when nothing priced was called. */
+  estimatedCostUsd: number | null;
   startedAt: ISODate;
   endedAt: ISODate | null;
   durationMs: number | null;
@@ -312,8 +324,11 @@ export interface LogEntry {
   message: string;
 }
 
-/** Never "succeeded" while the runtime is a simulation: nothing ran. */
-export type ToolCallStatus = 'pending' | 'simulated' | 'denied' | 'failed';
+/**
+ * Never "succeeded": no tool is executed in this release. `unavailable` means
+ * every check allowed the call, but no implementation exists to run it.
+ */
+export type ToolCallStatus = 'pending' | 'simulated' | 'unavailable' | 'denied' | 'failed';
 
 export interface ToolCall {
   id: ID;
@@ -395,7 +410,33 @@ export interface SandboxCheckResult extends SandboxStatus {
   report: SandboxReport | null;
 }
 
+/** One message of a model-driven run. Model text is data: render it as text. */
+export interface ConversationTurn {
+  role: 'user' | 'assistant';
+  text: string;
+  toolCalls: { id: string; name: string; arguments: string }[];
+  toolResults: { callId: string; content: string; isError: boolean }[];
+}
+
+/** What the model gateway can do here. Never includes a credential. */
+export interface ModelGatewayStatus {
+  enabled: boolean;
+  providers: { name: string; configured: boolean }[];
+  routes: { tier: string; provider: string; model: string; available: boolean }[];
+  limits: {
+    requestsPerMinute: number;
+    dailyTokenLimit: number;
+    maxTurns: number;
+    timeoutSeconds: number;
+  };
+  usageToday: { requests: number; tokens: number; estimatedCostUsd: number };
+  detail: string;
+}
+
 export interface ExecutionDetail extends Execution {
+  /** What the requester asked the agent to do. */
+  input: string | null;
+  conversation: ConversationTurn[];
   timeline: TimelineEvent[];
   logs: LogEntry[];
   toolCalls: ToolCall[];

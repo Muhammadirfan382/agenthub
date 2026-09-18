@@ -6,6 +6,7 @@ import type {
   Execution,
   ExecutionDetail,
   ID,
+  ModelGatewayStatus,
   RuntimeState,
   SandboxCheckResult,
   SandboxStatus,
@@ -16,6 +17,7 @@ import {
   ApprovalSchema,
   ExecutionDetailSchema,
   ExecutionSchema,
+  ModelGatewayStatusSchema,
   RuntimeStateSchema,
   SandboxCheckResultSchema,
   SandboxStatusSchema,
@@ -91,6 +93,10 @@ export const httpRuntimeService: RuntimeService = {
 
   sandbox(): Promise<SandboxStatus> {
     return apiRequest('/api/v1/organization/sandbox', SandboxStatusSchema);
+  },
+
+  models(): Promise<ModelGatewayStatus> {
+    return apiRequest('/api/v1/organization/models', ModelGatewayStatusSchema);
   },
 
   checkSandbox(): Promise<SandboxCheckResult> {

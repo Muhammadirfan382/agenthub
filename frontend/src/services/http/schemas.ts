@@ -5,6 +5,7 @@ import type {
   Approval,
   Execution,
   ExecutionDetail,
+  ModelGatewayStatus,
   RuntimeState,
   SandboxCheckResult,
   SandboxReport,
@@ -123,6 +124,9 @@ const executionShape = {
   status: executionStatus,
   trigger,
   runtime: z.enum(['simulation', 'sandbox']),
+  mode: z.enum(['model', 'simulated']),
+  modelRoute: z.string().nullable(),
+  estimatedCostUsd: z.number().nullable(),
   startedAt: iso,
   endedAt: iso.nullable(),
   durationMs: z.number().nullable(),
@@ -183,6 +187,31 @@ const sandboxStatusShape = {
   detail: z.string(),
 };
 
+export const ModelGatewayStatusSchema: z.ZodType<ModelGatewayStatus> = z.object({
+  enabled: z.boolean(),
+  providers: z.array(z.object({ name: z.string(), configured: z.boolean() })),
+  routes: z.array(
+    z.object({
+      tier: z.string(),
+      provider: z.string(),
+      model: z.string(),
+      available: z.boolean(),
+    }),
+  ),
+  limits: z.object({
+    requestsPerMinute: z.number(),
+    dailyTokenLimit: z.number(),
+    maxTurns: z.number(),
+    timeoutSeconds: z.number(),
+  }),
+  usageToday: z.object({
+    requests: z.number(),
+    tokens: z.number(),
+    estimatedCostUsd: z.number(),
+  }),
+  detail: z.string(),
+});
+
 export const SandboxStatusSchema: z.ZodType<SandboxStatus> = z.object(sandboxStatusShape);
 
 export const SandboxCheckResultSchema: z.ZodType<SandboxCheckResult> = z.object({
@@ -194,6 +223,17 @@ export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
   ...executionShape,
   approvals: z.array(ApprovalSchema),
   sandboxReport: SandboxReportSchema.nullable(),
+  input: z.string().nullable(),
+  conversation: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      text: z.string(),
+      toolCalls: z.array(z.object({ id: z.string(), name: z.string(), arguments: z.string() })),
+      toolResults: z.array(
+        z.object({ callId: z.string(), content: z.string(), isError: z.boolean() }),
+      ),
+    }),
+  ),
   timeline: z.array(
     z.object({
       id,
@@ -216,7 +256,7 @@ export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
       id,
       tool: z.string(),
       capability: z.string(),
-      status: z.enum(['pending', 'simulated', 'denied', 'failed']),
+      status: z.enum(['pending', 'simulated', 'unavailable', 'denied', 'failed']),
       startedAt: iso,
       durationMs: z.number().nullable(),
       inputSummary: z.string(),

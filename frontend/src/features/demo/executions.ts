@@ -55,6 +55,10 @@ function toExecution(seed: Seed): Execution {
     status: seed.status,
     trigger: seed.trigger ?? 'manual',
     runtime: 'simulation',
+    // Demo runs never called a model: no route, no cost, no conversation.
+    mode: 'simulated',
+    modelRoute: null,
+    estimatedCostUsd: null,
     startedAt,
     endedAt: seed.durationMs === null ? null : addMs(startedAt, seed.durationMs),
     durationMs: seed.durationMs,
@@ -155,6 +159,8 @@ export function buildDemoExecutionDetail(execution: Execution): ExecutionDetail 
     approvals: [],
     // Demo runs never had a container: no report is invented for them.
     sandboxReport: null,
+    input: null,
+    conversation: [],
     timeline,
     logs,
     toolCalls,

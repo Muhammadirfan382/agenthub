@@ -25,6 +25,7 @@ import type {
   RiskLevel,
   SecurityEvent,
   SecurityOverview,
+  ModelGatewayStatus,
   RuntimeState,
   SandboxCheckResult,
   SandboxStatus,
@@ -75,7 +76,8 @@ export interface AgentService {
   remove(id: ID): Promise<void>;
   setStatus(id: ID, status: AgentStatus): Promise<Agent>;
   /** Requests an execution. Nothing actually runs until the Phase 5 runtime exists. */
-  requestExecution(id: ID): Promise<Execution>;
+  /** Queues a run. `input` is the task, sent to the model as the user's request. */
+  requestExecution(id: ID, input?: string): Promise<Execution>;
   /** Published manifests, newest first. */
   versions(id: ID): Promise<AgentVersion[]>;
   /** Freezes the current configuration as a published version. */
@@ -154,6 +156,8 @@ export interface RuntimeService {
   sandbox(): Promise<SandboxStatus>;
   /** Starts one throwaway container and reports each isolation guarantee. */
   checkSandbox(): Promise<SandboxCheckResult>;
+  /** Model providers, tier routes, limits and today's usage. Never credentials. */
+  models(): Promise<ModelGatewayStatus>;
 }
 
 export interface SecurityService {

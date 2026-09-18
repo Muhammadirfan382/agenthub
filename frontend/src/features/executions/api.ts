@@ -126,6 +126,12 @@ export function useRuntimeState() {
   return useQuery({ queryKey: queryKeys.runtime.state, queryFn: () => runtime.state() });
 }
 
+/** Which tiers a real model answers, the limits, and today's usage. */
+export function useModelGatewayStatus() {
+  const { runtime } = useServices();
+  return useQuery({ queryKey: queryKeys.runtime.models, queryFn: () => runtime.models() });
+}
+
 /** Reads the sandbox configuration. Asking starts no container. */
 export function useSandboxStatus() {
   const { runtime } = useServices();

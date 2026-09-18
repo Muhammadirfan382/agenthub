@@ -10,6 +10,7 @@ from app.db.models.execution import (
 )
 from app.db.models.identity import Membership, Organization, Session, User
 from app.db.models.registry import AgentVersion, Installation
+from app.db.models.usage import ModelUsage
 
 __all__ = [
     "Agent",
@@ -21,6 +22,7 @@ __all__ = [
     "ExecutionToolCall",
     "Installation",
     "Membership",
+    "ModelUsage",
     "Organization",
     "Session",
     "User",

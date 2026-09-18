@@ -1,24 +1,22 @@
 """The execution engine: one run, one step at a time.
 
-What is real here: the state machine, the budget, the approval pauses, the
-cancellation checks, the kill switch, the sandbox the run is given, and the
-record of everything that happened.
+Every run starts the same way: the kill switch, cancellation and budget are
+checked before each step, and the first step gives the run a sandbox (Phase 6)
+and decides how it will be driven:
 
-What is still *not* real is the work itself. A run now starts a genuinely
-isolated container (Phase 6) and refuses to continue if that container does not
-hold — but nothing is executed inside it, because no agent program exists until
-the model gateway arrives (Phase 7). Tool calls are therefore recorded as
-`simulated` rather than `succeeded`, and `runtime` says which of the two
-happened: `sandbox` when a verified container was created for the run,
-`simulation` when none was available.
+* **model** - the agent's tier routes to a configured provider, so a real model
+  answers through the model gateway and asks for tools through the tool
+  gateway (`agent_loop.py`);
+* **simulated** - no provider is configured, so the scripted plan derived from
+  the agent's declaration is recorded instead, and says so at every step.
+
+In neither mode is a tool executed: none has an implementation until the
+egress protections of Phase 8 exist. Nothing runs inside the sandbox either.
 """
 
 import logging
-import uuid
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -27,15 +25,17 @@ from app.db.models import (
     Agent,
     Execution,
     ExecutionApproval,
-    ExecutionEvent,
-    ExecutionLog,
-    ExecutionToolCall,
     Organization,
 )
+from app.llm.gateway import get_gateway
+from app.runtime.agent_loop import model_step
 from app.runtime.plan import Step, build_plan
+from app.runtime.records import ExecutionRecorder, StepOutcome, new_id
+from app.runtime.records import decided_approval as _decided_approval
+from app.runtime.records import fail as _fail
+from app.runtime.records import finish as _finish
 from app.runtime.sandbox import get_sandbox
 from app.sandbox import build_spec
-from app.schemas.enums import ExecutionStatus, LogLevel, TimelineKind
 
 logger = logging.getLogger(__name__)
 
@@ -51,125 +51,12 @@ SIMULATED_TOOL_TOKENS = 120
 SIMULATED_STEP_MS = 60
 
 
-@dataclass(frozen=True)
-class StepOutcome:
-    """What the engine did, so a caller can decide whether to keep going."""
-
-    status: ExecutionStatus
-    finished: bool
-    paused: bool = False
-
-
-def new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-class ExecutionRecorder:
-    """Appends to an execution's timeline, logs and tool calls."""
-
-    def __init__(self, session: AsyncSession, execution: Execution) -> None:
-        self.session = session
-        self.execution = execution
-        self._sequence: int | None = None
-
-    async def _next_sequence(self) -> int:
-        if self._sequence is None:
-            highest = await self.session.scalar(
-                select(func.max(ExecutionEvent.sequence)).where(
-                    ExecutionEvent.execution_id == self.execution.id
-                )
-            )
-            self._sequence = int(highest or 0)
-        self._sequence += 1
-        return self._sequence
-
-    async def event(
-        self, kind: TimelineKind, label: str, detail: str | None = None
-    ) -> ExecutionEvent:
-        event = ExecutionEvent(
-            id=new_id("evt"),
-            execution_id=self.execution.id,
-            organization_id=self.execution.organization_id,
-            sequence=await self._next_sequence(),
-            at=now_utc(),
-            kind=kind,
-            label=label,
-            detail=detail,
-        )
-        self.session.add(event)
-        return event
-
-    async def log(self, level: LogLevel, message: str) -> None:
-        self.session.add(
-            ExecutionLog(
-                id=new_id("log"),
-                execution_id=self.execution.id,
-                sequence=await self._next_sequence(),
-                at=now_utc(),
-                level=level,
-                message=message,
-            )
-        )
-
-    async def tool_call(
-        self,
-        *,
-        tool: str,
-        capability: str,
-        status: str,
-        input_summary: str,
-        output_summary: str | None,
-        duration_ms: int | None,
-    ) -> None:
-        self.session.add(
-            ExecutionToolCall(
-                id=new_id("tcl"),
-                execution_id=self.execution.id,
-                sequence=await self._next_sequence(),
-                tool=tool,
-                capability=capability,
-                status=status,
-                started_at=now_utc(),
-                duration_ms=duration_ms,
-                input_summary=input_summary,
-                output_summary=output_summary,
-            )
-        )
-
-
 async def plan_for(session: AsyncSession, execution: Execution) -> list[Step]:
     """The agent's current declaration, used as the shape of the run."""
     agent = await session.get(Agent, execution.agent_id)
     if agent is None:
         return [Step(kind="finish", label="Summarise the outcome")]
     return build_plan(tools=list(agent.tools), permissions=agent.permissions, model=execution.model)
-
-
-def _finish(execution: Execution, status: ExecutionStatus, *, summary: str | None = None) -> None:
-    now = now_utc()
-    execution.status = status
-    execution.ended_at = now
-    execution.duration_ms = int((now - ensure_utc(execution.started_at)).total_seconds() * 1000)
-    execution.claimed_by = None
-    execution.heartbeat_at = None
-    if summary is not None:
-        execution.result_summary = summary
-
-
-async def _fail(
-    recorder: ExecutionRecorder,
-    execution: Execution,
-    *,
-    status: ExecutionStatus,
-    code: str,
-    message: str,
-) -> StepOutcome:
-    execution.error_code = code
-    execution.error_message = message
-    await recorder.event("error", message, detail=f"Error code: {code}")
-    await recorder.log("error", message)
-    _finish(execution, status)
-    return StepOutcome(status=status, finished=True)
 
 
 async def _budget_exceeded(recorder: ExecutionRecorder, execution: Execution) -> StepOutcome | None:
@@ -216,18 +103,6 @@ async def _organization_paused(session: AsyncSession, execution: Execution) -> O
     if organization is not None and organization.executions_paused:
         return organization
     return None
-
-
-async def _decided_approval(
-    session: AsyncSession, execution: Execution, step_index: int
-) -> ExecutionApproval | None:
-    approval: ExecutionApproval | None = await session.scalar(
-        select(ExecutionApproval).where(
-            ExecutionApproval.execution_id == execution.id,
-            ExecutionApproval.step_index == step_index,
-        )
-    )
-    return approval
 
 
 async def _run_tool_step(
@@ -410,10 +285,43 @@ async def prepare_sandbox(
     await recorder.event(
         "lifecycle",
         "No sandbox available",
-        detail=(f"{reason} This run is recorded by the simulation runtime and executes nothing."),
+        detail=(
+            f"{reason} Nothing runs in a container for this run, and it executes nothing "
+            "on this machine: model calls go through the gateway and tools are not run."
+        ),
     )
     await recorder.log("warn", f"Running without a sandbox: {reason}")
     return None
+
+
+async def choose_mode(
+    session: AsyncSession, execution: Execution, recorder: ExecutionRecorder, settings: Settings
+) -> None:
+    """Decides whether a real model drives this run, and records the decision."""
+    gateway = get_gateway(settings)
+    route = gateway.route(execution.model)
+    if route is not None and gateway.available_for(execution.model):
+        execution.mode = "model"
+        execution.model_route = str(route)
+        await recorder.event(
+            "lifecycle",
+            f"Model gateway: {route}",
+            detail=f"The {execution.model} tier routes to {route}. Tools are checked, not run.",
+        )
+        return
+
+    execution.mode = "simulated"
+    why = (
+        f"The {execution.model} tier routes to {route}, whose provider has no credentials."
+        if route is not None
+        else f"No route is configured for the {execution.model} tier."
+    )
+    await recorder.event(
+        "lifecycle",
+        "No model provider configured",
+        detail=f"{why} This run is simulated: no model is called.",
+    )
+    await recorder.log("warn", f"Simulated run: {why}")
 
 
 async def advance(
@@ -444,6 +352,26 @@ async def advance(
     if over_budget is not None:
         return over_budget
 
+    if execution.mode == "model" and execution.step_index >= 1:
+        agent = await session.get(Agent, execution.agent_id)
+        if agent is None:
+            return await _fail(
+                recorder,
+                execution,
+                status="FAILED",
+                code="agent_missing",
+                message="The agent behind this run no longer exists.",
+            )
+        resolved = settings or get_settings()
+        return await model_step(
+            session,
+            recorder,
+            execution,
+            agent=agent,
+            gateway=get_gateway(resolved),
+            settings=resolved,
+        )
+
     plan = await plan_for(session, execution)
     if execution.step_index >= len(plan):
         _finish(execution, "COMPLETED", summary=execution.result_summary)
@@ -455,9 +383,11 @@ async def advance(
         execution.status = "STARTING"
         await recorder.event("lifecycle", "Execution started")
 
-        refused = await prepare_sandbox(session, execution, recorder, settings or get_settings())
+        resolved = settings or get_settings()
+        refused = await prepare_sandbox(session, execution, recorder, resolved)
         if refused is not None:
             return refused
+        await choose_mode(session, execution, recorder, resolved)
 
         execution.step_index += 1
         execution.status = "RUNNING"
@@ -494,11 +424,16 @@ async def run_to_completion(
     max_steps: int = 100,
     settings: Settings | None = None,
 ) -> StepOutcome:
-    """Advances until the run finishes, pauses for approval, or hits max_steps."""
+    """Advances until the run finishes, pauses for approval, or hits max_steps.
+
+    Each step is committed as soon as it is done, so progress is durable and
+    visible to the API, the event stream and other workers - a run that loses
+    its worker resumes from the last committed step, not from the beginning.
+    """
     outcome = StepOutcome(status=execution.status, finished=False)  # type: ignore[arg-type]
     for _ in range(max_steps):
         outcome = await advance(session, execution, settings=settings)
-        await session.flush()
+        await session.commit()
         if outcome.finished or outcome.paused:
             return outcome
     logger.warning("execution %s did not finish within %s steps", execution.id, max_steps)

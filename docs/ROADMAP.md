@@ -168,6 +168,28 @@ simulations unless `REQUIRE_SANDBOX=true`.
   checks.
 - LLM credentials server-side only.
 
+**Delivered:** a provider-neutral model interface with Claude and OpenAI
+adapters on their official SDKs; tier routing configured per deployment
+(Claude Haiku 4.5 / Sonnet 5 / Opus 5 by default); a gateway that enforces
+per-organization request rates and daily token budgets and writes every request
+to a usage ledger with an estimated cost; a tool gateway that validates every
+model tool call against the agent's grants, a strict schema and human approval;
+a model-driven run loop that resumes after approvals and worker loss without
+re-asking the model; per-step commits and heartbeats so long model calls are
+safe; and the task, conversation, route and cost shown on each run, with the
+gateway's state in Settings → Runtime. See [BACKEND.md](BACKEND.md) §8.
+
+**How it is verified:** adapters against each SDK's own types with a recording
+client, and whole runs against a scripted provider, on any machine. **No real
+provider was called** while this phase was built: no credentials were
+available. `python -m scripts.model_smoke_test --yes` checks real routes once a
+key is configured.
+
+**Deliberately not in this phase:** executing any tool (every allowed call is
+recorded as not executed until Phase 8's SSRF and egress protection exists),
+token-by-token streaming to the browser, per-agent instruction prompts, prices
+for OpenAI models, and rate limits shared across processes.
+
 ## Phase 8: Security layer
 
 **Objective:** harden the platform against realistic threats.

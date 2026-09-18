@@ -30,6 +30,7 @@ from app.db import models  # noqa: F401  (registers tables on the metadata)
 from app.db.base import Base
 from app.db.models import Membership, Organization, User
 from app.db.session import enable_sqlite_foreign_keys
+from app.llm.gateway import ModelGateway, use_gateway
 from app.main import create_app
 from app.runtime.sandbox import use_sandbox
 from app.sandbox import UnavailableSandbox
@@ -45,7 +46,16 @@ def runtime_settings(**overrides: Any) -> Settings:
     — quite rightly — refuses to start a production deployment without a
     database URL. Tests say what they mean instead of relying on that fallback.
     """
-    return Settings(environment="development", **overrides)
+    # Provider keys are read only under their namespaced names, from the
+    # environment and from arguments alike.
+    values = {_KEY_ALIASES.get(name, name): value for name, value in overrides.items()}
+    return Settings(environment="development", **values)
+
+
+_KEY_ALIASES = {
+    "anthropic_api_key": "AGENTHUB_ANTHROPIC_API_KEY",
+    "openai_api_key": "AGENTHUB_OPENAI_API_KEY",
+}
 
 
 # Throwaway credentials for a database that lives for one test.
@@ -166,6 +176,20 @@ def sandbox_is_never_the_host_s() -> Iterator[None]:
         yield
     finally:
         use_sandbox(None)
+
+
+@pytest.fixture(autouse=True)
+def no_real_model_provider() -> Iterator[None]:
+    """No test ever reaches a real model provider, whatever keys the host has.
+
+    The default gateway has no providers, so runs are simulated. Tests that
+    exercise model-driven runs substitute a gateway with a scripted provider.
+    """
+    use_gateway(ModelGateway(runtime_settings(), providers={}))
+    try:
+        yield
+    finally:
+        use_gateway(None)
 
 
 @pytest.fixture

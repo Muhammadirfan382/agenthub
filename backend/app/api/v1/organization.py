@@ -8,12 +8,15 @@ release it.
 import uuid
 
 from fastapi import APIRouter
+from sqlalchemy import func, select
 
 from app.api.deps import AuthDep, SettingsDep
 from app.core.config import Settings
-from app.core.time import ensure_utc
-from app.db.models import Organization
+from app.core.time import ensure_utc, now_utc
+from app.db.models import ModelUsage, Organization
 from app.db.session import SessionDep
+from app.llm.gateway import get_gateway, start_of_day
+from app.llm.routing import PROVIDERS
 from app.runtime.sandbox import get_sandbox
 from app.sandbox import build_spec
 from app.schemas.execution import (
@@ -22,6 +25,7 @@ from app.schemas.execution import (
     SandboxCheckResult,
     SandboxStatus,
 )
+from app.schemas.models import ModelGatewayStatus
 from app.services import authorization, runtime_service
 
 router = APIRouter(prefix="/organization", tags=["organization"])
@@ -119,3 +123,61 @@ async def check_sandbox(auth: AuthDep, settings: SettingsDep) -> SandboxCheckRes
     payload = _sandbox_status(settings, available=result.started, detail=detail)
     payload["report"] = result.report.as_dict()
     return SandboxCheckResult.model_validate(payload)
+
+
+@router.get(
+    "/models",
+    response_model=ModelGatewayStatus,
+    summary="Model gateway status",
+    description="Configured providers, tier routes, limits and today's usage. Never credentials.",
+)
+async def get_model_status(
+    session: SessionDep, auth: AuthDep, settings: SettingsDep
+) -> ModelGatewayStatus:
+    authorization.require(auth.role, "execution:read")
+    gateway = get_gateway(settings)
+    since = start_of_day(now_utc())
+    requests = await session.scalar(
+        select(func.count(ModelUsage.id)).where(
+            ModelUsage.organization_id == auth.organization_id, ModelUsage.at >= since
+        )
+    )
+    tokens = await gateway.tokens_used_today(session, auth.organization_id)
+    cost = await gateway.cost_today(session, auth.organization_id)
+    routes = gateway.all_routes()
+    any_available = any(gateway.available_for(tier) for tier in routes)
+    if not settings.models_enabled:
+        detail = "The model gateway is switched off (MODELS_ENABLED=false). Runs are simulated."
+    elif any_available:
+        detail = "Runs on a tier with a configured provider are answered by a real model."
+    else:
+        detail = "No provider has credentials, so every run is simulated and no model is called."
+    return ModelGatewayStatus.model_validate(
+        {
+            "enabled": settings.models_enabled,
+            "providers": [
+                {"name": name, "configured": gateway.configured(name)} for name in PROVIDERS
+            ],
+            "routes": [
+                {
+                    "tier": tier,
+                    "provider": route.provider,
+                    "model": route.model,
+                    "available": gateway.available_for(tier),
+                }
+                for tier, route in routes.items()
+            ],
+            "limits": {
+                "requestsPerMinute": settings.model_requests_per_minute_per_org,
+                "dailyTokenLimit": settings.model_daily_token_limit_per_org,
+                "maxTurns": settings.model_max_turns,
+                "timeoutSeconds": settings.model_request_timeout_seconds,
+            },
+            "usageToday": {
+                "requests": int(requests or 0),
+                "tokens": tokens,
+                "estimatedCostUsd": round(cost / 1_000_000, 6),
+            },
+            "detail": detail,
+        }
+    )

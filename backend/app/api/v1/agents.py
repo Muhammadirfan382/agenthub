@@ -95,12 +95,21 @@ async def delete_agent(session: SessionDep, auth: AuthDep, agent_id: str) -> Res
     response_model=ExecutionRead,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Request an execution",
-    description="Records a queued execution. No agent runs until the runtime exists.",
+    description=(
+        "Queues a run. With a model provider configured, a real model drives it through "
+        "the model gateway; tools are checked but never executed."
+    ),
 )
 async def request_execution(
     session: SessionDep, auth: AuthDep, agent_id: str, body: ExecutionRequest | None = None
 ) -> ExecutionRead:
     trigger = body.trigger if body else "manual"
     return to_execution_read(
-        await agent_service.request_execution(session, agent_id, trigger, context=auth)
+        await agent_service.request_execution(
+            session,
+            agent_id,
+            trigger,
+            context=auth,
+            input_text=body.input if body else None,
+        )
     )

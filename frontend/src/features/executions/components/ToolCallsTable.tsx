@@ -8,6 +8,8 @@ import type { ToolCall, ToolCallStatus } from '@/types/domain';
 const STATUS: Record<ToolCallStatus, { label: string; tone: BadgeTone }> = {
   // Nothing was executed: the runtime recorded the request instead.
   simulated: { label: 'Simulated', tone: 'info' },
+  // Allowed by every check, but no tool implementation exists to run it.
+  unavailable: { label: 'Not executed', tone: 'neutral' },
   failed: { label: 'Failed', tone: 'danger' },
   denied: { label: 'Denied by policy', tone: 'high' },
   pending: { label: 'Pending', tone: 'warning' },

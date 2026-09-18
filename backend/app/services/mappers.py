@@ -20,6 +20,7 @@ from app.db.models import (
     Organization,
     User,
 )
+from app.runtime.agent_loop import conversation_view
 from app.schemas.agent import AgentRead
 from app.schemas.auth import (
     MemberRead,
@@ -81,6 +82,13 @@ def _execution_payload(execution: Execution, *, pending_approvals: int = 0) -> d
         "status": execution.status,
         "trigger": execution.trigger,
         "runtime": execution.runtime,
+        "mode": execution.mode,
+        "modelRoute": execution.model_route,
+        "estimatedCostUsd": (
+            round(execution.cost_microusd / 1_000_000, 6)
+            if execution.cost_microusd is not None
+            else None
+        ),
         "startedAt": ensure_utc(execution.started_at),
         "endedAt": ensure_utc(execution.ended_at) if execution.ended_at else None,
         "durationMs": execution.duration_ms,
@@ -172,6 +180,8 @@ def to_execution_detail(
         for approval in approvals
     ]
     payload["sandboxReport"] = execution.sandbox_report
+    payload["input"] = execution.input_text
+    payload["conversation"] = conversation_view(execution)
     payload["error"] = (
         {"code": execution.error_code, "message": execution.error_message}
         if execution.error_code

@@ -2,13 +2,13 @@
 
 FastAPI service for agents and executions, backed by SQLAlchemy and Alembic.
 
-**Status (Phase 6).** Persists organizations, users, memberships, sessions,
+**Status (Phase 7).** Persists organizations, users, memberships, sessions,
 agents, published versions, marketplace listings, installations, executions and
 everything a run records. Every endpoint except the health check and sign-in
 requires a session, and every action is checked against a role. A runtime
 orchestrates executions and gives each one an isolated, verified container
-(§7), but **executes nothing** inside it: there is no model gateway yet, so no
-agent code, model or tool is actually run (see §6). Treat it as pre-release software — it has never been deployed, audited or
+(§7). With a provider configured, a real model answers each run through the
+model gateway (§8); the tools it asks for are checked and never executed. Treat it as pre-release software — it has never been deployed, audited or
 run against real data.
 
 ---
@@ -28,6 +28,7 @@ backend/
 │   ├── schemas/            Pydantic request/response models and enums
 │   ├── runtime/            Plan, engine and worker (orchestration only)
 │   ├── sandbox/            Container spec, runner and isolation report
+│   ├── llm/                Model gateway, routing, pricing, provider adapters
 │   ├── services/           Business rules, authorization matrix, risk scoring
 │   └── main.py             create_app() application factory
 ├── scripts/create_user.py  Creates an account; there is no public sign-up
@@ -69,6 +70,27 @@ default.
 | `SANDBOX_TIMEOUT_SECONDS` | `60` | After this the container is killed and removed. |
 | `REQUIRE_SANDBOX` | `false` | Refuse a run that cannot get a verified container, instead of simulating it. |
 
+| `AGENTHUB_ANTHROPIC_API_KEY` | unset | Enables the Claude adapter. Server-side only; never logged or returned. |
+| `AGENTHUB_OPENAI_API_KEY` | unset | Enables the OpenAI adapter. Same rules. |
+| `MODELS_ENABLED` | `true` | Off means every run is simulated, whatever keys exist. |
+| `MODEL_ROUTE_FAST_SMALL` | `anthropic:claude-haiku-4-5` | `provider:model` for this tier. |
+| `MODEL_ROUTE_BALANCED_LARGE` | `anthropic:claude-sonnet-5` | Same. |
+| `MODEL_ROUTE_REASONING_LARGE` | `anthropic:claude-opus-5` | Same. |
+| `MODEL_REQUEST_TIMEOUT_SECONDS` | `180` | Per model request. |
+| `MODEL_MAX_TURNS` | `8` | Model turns one run may take. |
+| `MODEL_REQUESTS_PER_MINUTE_PER_ORG` | `30` | Per organization, per process. |
+| `MODEL_DAILY_TOKEN_LIMIT_PER_ORG` | `2000000` | Per organization per UTC day, from the ledger. |
+
+A blank key is the same as no key. Routes are validated when settings load.
+
+**No ambient credentials.** Only the `AGENTHUB_`-prefixed key variables are read:
+a plain `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` set machine-wide for other tools
+is ignored. Both SDK clients are pinned to the official endpoints, so
+`ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` cannot redirect prompts or keys, and
+the OpenAI client drops any ambient `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` or
+`OPENAI_ADMIN_KEY`. One residual: both SDKs still merge `ANTHROPIC_CUSTOM_HEADERS` /
+`OPENAI_CUSTOM_HEADERS` from the environment if set; nothing here sets them.
+
 The sandbox limits are checked when settings load: an out-of-range value stops
 the process rather than failing every run it later picks up.
 
@@ -101,7 +123,7 @@ stays snake_case (`CamelModel` generates the aliases).
 | `PUT` | `/agents/{id}` | owner of the agent, or admin | Replaces the configuration; recomputes the risk score. |
 | `PATCH` | `/agents/{id}/status` | owner of the agent, or admin | `active`, `paused`, `draft`, `disabled`. |
 | `DELETE` | `/agents/{id}` | owner of the agent, or admin | 204. Cascades to that agent's executions. |
-| `POST` | `/agents/{id}/executions` | owner of the agent, or admin | 202. Records a `QUEUED` execution. Nothing runs. |
+| `POST` | `/agents/{id}/executions` | owner of the agent, or admin | 202. Queues a run; optional `input` (≤ 8,000 characters) is the task sent to the model. |
 | `GET` | `/agents/{id}/versions` | viewer | Published manifests, newest first. |
 | `POST` | `/agents/{id}/versions` | owner of the agent, or admin | Publishes the current configuration. 409 if that version exists. |
 | `GET` | `/agents/{id}/versions/{versionId}` | viewer | One frozen manifest. |
@@ -125,6 +147,7 @@ stays snake_case (`CamelModel` generates the aliases).
 | `PATCH` | `/organization/runtime` | admin to engage, owner to release | The organization-wide stop. |
 | `GET` | `/organization/sandbox` | viewer | Sandbox configuration and whether a runtime answers. Starts nothing. |
 | `POST` | `/organization/sandbox/check` | admin | Starts one throwaway container and returns every isolation check. |
+| `GET` | `/organization/models` | viewer | Providers (configured or not, never the key), routes, limits and today's usage. |
 
 **Collections** answer with `{items, total, limit, offset}`; `limit` defaults to 50
 and is capped at 200.
@@ -247,20 +270,26 @@ version - upgrading is a deliberate act, because a new manifest may ask for more
 
 ## 6. The runtime
 
-**It orchestrates; it does not execute.** Each run is given a verified
-container (§7), but there is no model gateway (Phase 7), so nothing runs inside
-it: no agent code, no model call, no tool. `runtime` records which of two things
-happened — `sandbox` when a verified container was created for the run,
-`simulation` when none was available — and tool calls are recorded as
-`simulated`, never as `succeeded`. Nothing in the database can be mistaken for
-work that happened.
+**A model may think; nothing acts.** Each run records two independent facts:
+`runtime` - `sandbox` when a verified container was created for it (§7),
+`simulation` when none was available - and `mode` - `model` when a real model
+answered through the gateway (§8), `simulated` when no provider was configured
+and the scripted plan below was recorded instead. In both modes no tool is
+executed and nothing runs inside the container, so tool calls are recorded as
+`unavailable`, `simulated`, `denied` or `failed` - never `succeeded`.
+
+**Every step is committed** as soon as it is done, and a worker heartbeats on a
+separate connection while a step waits on a model, so a long model call never
+looks like a dead worker (which would pay for the same call twice) and never
+holds the database. A run that keeps failing inside its worker is failed after
+three claims (`worker_retries`) instead of being retried forever.
 
 What *is* real is everything around the work: the state machine, the budget,
 the approval pauses, cancellation, the kill switch, the sandbox, and the record.
 
 **The plan** (`app/runtime/plan.py`) comes from the agent's own declaration:
-prepare, think, one step per declared tool, finish. It is not a model deciding
-what to do — that arrives with Phase 7.
+prepare, think, one step per declared tool, finish. Simulated runs walk it;
+model-driven runs let the model decide (§8).
 
 **The engine** (`app/runtime/engine.py`) walks one step at a time, writing
 progress after each. Before every step it checks, in order: the kill switch,
@@ -375,7 +404,89 @@ protection without providing it.
 network is simply absent), a custom seccomp profile (Docker's default applies),
 user-namespace remapping, and stronger isolation such as gVisor or microVMs.
 
-## 8. Domain rules
+## 8. The model gateway
+
+**What is real now.** When an agent's tier routes to a provider with
+credentials, a real model answers the run. Everything it does goes through two
+gateways; neither lets it touch anything.
+
+**Tiers and routes** (`app/llm/routing.py`). Agents choose a tier, never a
+vendor model. Each deployment decides what a tier means:
+
+| Tier | Default route | Setting |
+| --- | --- | --- |
+| `fast-small` | `anthropic:claude-haiku-4-5` | `MODEL_ROUTE_FAST_SMALL` |
+| `balanced-large` | `anthropic:claude-sonnet-5` | `MODEL_ROUTE_BALANCED_LARGE` |
+| `reasoning-large` | `anthropic:claude-opus-5` | `MODEL_ROUTE_REASONING_LARGE` |
+
+A route is `anthropic:<model>` or `openai:<model>`. No OpenAI model is routed by
+default, and none is priced: this code does not guess which models an account
+has or what they cost.
+
+**Adapters** (`app/llm/providers/`). One per provider, each through its
+official SDK, each translating to and from neutral types (`app/llm/types.py`):
+
+- *Claude* streams every request and waits for the final message; sends no
+  temperature (current models reject sampling parameters); caches the stable
+  system prompt and tool list; and for `claude-opus-5` and `claude-fable-5-1`
+  opts into Anthropic's server-side refusal fallback (`fallbacks="default"`),
+  recording the model that actually answered. Assistant turns are replayed
+  exactly as Claude produced them, except the blocks Anthropic says to drop
+  after a mid-answer fallback.
+- *OpenAI* uses Chat Completions. Tool arguments that are not a JSON object are
+  marked malformed and refused, never repaired.
+- Both map SDK exceptions to platform errors without chaining the original, so
+  a request, header or key an SDK exception might carry never reaches a log.
+
+**The gateway** (`app/llm/gateway.py`) resolves the route, refuses a provider
+without credentials, enforces the organization's requests per minute (per
+process, like sign-in throttling) and daily token budget (counted from the
+ledger), calls the adapter, and writes a `model_usage` row for **every** request
+- answered, refused, failed or throttled - with tokens and an estimated cost. It
+never logs a prompt, an answer or a key.
+
+**The tool gateway** (`app/runtime/tools.py`). Only tools the agent declared and
+was granted are offered. Every call the model makes is checked, in order: is it
+a tool this agent may use; are the arguments a JSON object matching the tool's
+schema exactly (unknown fields rejected); does the grant require a person's
+approval. Then it is **not executed** - no tool has an implementation until
+Phase 8's egress protection exists - and the model is told so in plain words.
+
+| The model asks for… | Recorded as | The model is told |
+| --- | --- | --- |
+| a tool it was not given | `denied` | Refused |
+| arguments outside the schema | `failed` | Invalid arguments, and which |
+| an approved tool, or one needing no approval | `unavailable` | Not executed; no result |
+| a tool a person refused | `denied` | Refused by that person |
+
+**The loop** (`app/runtime/agent_loop.py`). Each engine step is one model turn or
+one tool call, and the conversation is saved on the execution between steps, so
+the kill switch, cancellation and budgets apply between every turn and every
+call, and a run paused for approval - or reclaimed from a dead worker - resumes
+exactly where it was without asking the model again. A run ends when the model
+answers; fails on `turn_limit` (`MODEL_MAX_TURNS`), `token_budget`,
+`tool_call_budget`, `model_refused`, `model_truncated` (a tool call cut off by
+the output limit) or `model_<error>`; and a truncated text answer is kept and
+flagged. The model's text is the run's result, stored and returned as text.
+
+**Without credentials** nothing changes from Phase 6: runs are `simulated`, and
+the timeline says which tier had no provider.
+
+**Checking real calls.** The automated suite never reaches a provider: an
+autouse fixture gives every test a gateway with no providers, and model-driven
+tests use a scripted stand-in that lives in the test package. To check real
+credentials and routes (a few cents per run):
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m scripts.model_smoke_test --yes
+```
+
+**Not yet:** executing any tool, streaming answers to the browser token by token,
+per-agent instruction prompts beyond the description, shared-store rate limits
+for several processes, and prices for OpenAI models.
+
+## 9. Domain rules
 
 The backend is authoritative; the frontend's Zod rules only improve the form.
 
@@ -390,13 +501,19 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   verification is not `rejected`.
 - Executions can only be requested for an `active` agent.
 
-## 9. Database
+## 10. Database
 
 - **Runtime tables:** `execution_events`, `execution_logs`,
   `execution_tool_calls` and `execution_approvals`, all cascading from the
   execution. `executions` also carries the budget it was given, the worker
   claim, the heartbeat, any error, and `sandbox_report` — what its container
-  said about its own isolation, null for runs that never had one.
+  said about its own isolation, null for runs that never had one; `mode`,
+  `model_route`, `input_text`, `cost_microusd` and `conversation` for
+  model-driven runs.
+- **Usage ledger:** `model_usage`, one row per model request with tier,
+  provider, requested and served model, outcome, tokens, estimated cost in
+  micro-dollars and the provider's request id. Counts only - never a prompt or
+  an answer. Rows outlive a deleted execution: spend is spend.
 - **Registry tables:** `agent_versions` (immutable manifests) and
   `installations` (one row per organization per installed agent, holding the
   grants). Both are organization-scoped like everything else.
@@ -445,7 +562,7 @@ cd backend
 Four fictional agents and three execution records, safe to run twice. The
 execution rows are records of requests, not evidence that anything ran.
 
-## 10. Testing
+## 11. Testing
 
 ```powershell
 cd backend
@@ -478,6 +595,18 @@ manifest asked for, that installing grants nothing by default, and that
 installations never cross organizations. PostgreSQL is covered in CI by applying,
 rolling back and reapplying the migrations against a real server.
 
+The model gateway is tested without a network or a key. Adapters are fed each
+SDK's own response types and a recording client (`test_llm_providers.py`):
+request shape, no sampling parameters, caching, refusal fallback only for the
+models that take it, the fallback echo rule, malformed tool arguments and every
+error mapping. Routing, pricing and the tool gateway's decisions are unit
+tested (`test_llm_gateway.py`). Whole runs go through the real engine, worker
+and API with a scripted provider (`test_model_runs.py`): answers, tool calls
+checked but not run, refusals and schema rejections, approval pauses that
+resume without re-asking the model, refusal, truncation, the turn, token, rate
+and daily limits, provider failures in the ledger, the status endpoint never
+returning a key, and organization isolation of usage.
+
 The sandbox is tested in three layers, and only one of them needs a daemon:
 
 - **What AgentHub asks for** (`test_sandbox_spec.py`, `test_sandbox_report.py`,
@@ -504,9 +633,13 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest -m sandbox
 ```
 
-## 11. Security status
+## 12. Security status
 
-Implemented: an orchestrator that executes nothing, a per-run container that is
+Implemented: a model gateway that keeps provider credentials server-side, never
+logs prompts, answers or keys, and meters every request against per-organization
+rate and daily token limits; a tool gateway that checks every model tool call
+against the agent's grants, a strict schema and human approval, and executes
+none; model output treated as data throughout; a per-run container that is
 ephemeral, non-root, capability-free, read-only, network-less and
 resource-limited, checked from the inside before every run and failing the run
 when it does not hold, budgets enforced per run,
@@ -526,11 +659,14 @@ throughout.
 **Not implemented yet:** MFA and SSO (password sign-in is the only method), email
 delivery and therefore password reset and email verification, an audit log, CORS
 configuration for a separate frontend origin, shared-store rate limiting for
-multiple workers, agent execution of any kind, a real model (Phase 7), an
-egress gateway, a custom seccomp profile, and real security scanning (Phase 8).
+multiple workers, executing any tool, an egress gateway, prompt-injection
+defences beyond treating all model and tool text as data, a custom seccomp
+profile, and real security scanning (Phase 8). Real model calls are tested
+against scripted stand-ins only: no provider was called while this phase was
+built, because no credentials were available.
 Real-container isolation is verified only in CI: it was not exercised on the
 machine this phase was built on, which has no container runtime. Grants and policies are checked
-when the runtime plans a step, but nothing enforces them against real code
-because no real code runs. Verification is a stored label, not the result of a
+before every tool call, but no tool runs, so they are enforced against
+requests rather than actions. Verification is a stored label, not the result of a
 review anyone performed. Nothing here has been penetration-tested or reviewed by
 anyone outside this repository.

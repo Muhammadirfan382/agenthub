@@ -72,7 +72,8 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
   schema, and server-state caching with explicit loading, error and empty states.
 - Authentication-aware routing and capability-aware UI (Phase 3). This is UX only;
   enforcement remains server-side.
-- Safe rendering of agent output: sanitized Markdown, no raw HTML (Phase 7/8).
+- Safe rendering of agent output: model and tool text is rendered as plain text
+  today (Phase 7); sanitized Markdown may follow, never raw HTML.
 - Content Security Policy and security headers at the hosting layer (Phase 8/10).
 
 ---
@@ -101,10 +102,14 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 - Agent runtime (Phase 5): a database-backed queue and worker that walks each
   run step by step, enforces the budget it was given, pauses for human approval,
   honours cancellation and an organization-wide kill switch, and records a
-  timeline, logs and tool calls. It **executes nothing** yet: see §5 and §6.
+  timeline, logs and tool calls.
+- Model gateway (Phase 7): tiers route to Claude or OpenAI models through
+  official SDKs; every request is rate limited, budgeted and metered per
+  organization. A tool gateway checks every tool call the model makes and
+  executes none. See §5.
 - Sandbox (Phase 6): before a run's first step the engine starts an isolated
   container, checks it from the inside, and fails the run if any isolation
-  check fails. Nothing executes inside it until the model gateway exists.
+  check fails. Nothing executes inside it yet.
 - Agent registry (Phase 4): immutable published manifests, marketplace
   listings governed by a visibility setting, and installations that record what
   an organization granted - never more than the manifest requested, and nothing
@@ -170,17 +175,25 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 ### Current implementation
 
-The orchestration is real; the work is not. `backend/app/runtime/` holds a
-database-backed queue (claim, heartbeat, reclaim), a step engine that walks the
-plan derived from an agent's declaration, per-run budgets, approval pauses,
-cancellation at step boundaries, and the organization kill switch.
+`backend/app/runtime/` holds a database-backed queue (claim, committed
+per-step progress, heartbeats during long steps, reclaim, a retry cap), per-run
+budgets, approval pauses, cancellation at step boundaries and the organization
+kill switch.
 
-Each run is marked with the runtime that produced it: `sandbox` when a verified
-container was created for it (§6), `simulation` when none was available. In
-both cases **no agent code, model call or tool invocation happens**: the model
-gateway is Phase 7, so tool calls are recorded as `simulated`, never
-`succeeded`. `agents/runtime/`, `agents/tools/` and `agents/policies/` remain
-empty placeholders.
+- **Model-driven runs.** When the agent's tier routes to a provider with
+  credentials, `agent_loop.py` drives the run one unit at a time - one model
+  turn or one tool call - saving the conversation between steps. Every model
+  call goes through the **model gateway** (`backend/app/llm/`): tier routing,
+  provider adapters behind a neutral interface, per-organization rate and daily
+  token limits, and a usage ledger with estimated cost.
+- **The tool gateway** checks each tool call against the agent's grants, a
+  strict per-tool schema and human approval, then records it as not executed:
+  no tool has an implementation until egress controls exist (Phase 8).
+- **Simulated runs.** Without a provider the scripted plan is recorded, and the
+  run says so.
+
+`agents/runtime/`, `agents/tools/` and `agents/policies/` remain empty
+placeholders.
 
 ### Planned architecture
 

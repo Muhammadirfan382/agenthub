@@ -9,10 +9,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.security import DEFAULT_COST_EXPONENT, MIN_PRODUCTION_COST_EXPONENT
+from app.llm.routing import ROUTE_PATTERN
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -86,6 +87,45 @@ class Settings(BaseSettings):
     #: so a machine without a container runtime still records runs honestly;
     #: turn it on where nothing may run unless it is provably isolated.
     require_sandbox: bool = False
+
+    # --- Model gateway (Phase 7) --------------------------------------------
+    # Credentials are read here, handed to the provider SDKs by the gateway, and
+    # never logged, returned by the API, sent to the browser or placed in a
+    # sandbox. Leave a key unset to leave that provider off.
+    #
+    # The variables are namespaced on purpose. A plain ANTHROPIC_API_KEY or
+    # OPENAI_API_KEY is often set machine-wide for other tools; AgentHub must
+    # never pick up a credential nobody configured for it.
+    models_enabled: bool = True
+    anthropic_api_key: SecretStr | None = Field(
+        default=None, validation_alias="AGENTHUB_ANTHROPIC_API_KEY"
+    )
+    openai_api_key: SecretStr | None = Field(
+        default=None, validation_alias="AGENTHUB_OPENAI_API_KEY"
+    )
+    #: Which real model answers for each tier, as provider:model.
+    model_route_fast_small: str = Field(default="anthropic:claude-haiku-4-5", pattern=ROUTE_PATTERN)
+    model_route_balanced_large: str = Field(
+        default="anthropic:claude-sonnet-5", pattern=ROUTE_PATTERN
+    )
+    model_route_reasoning_large: str = Field(
+        default="anthropic:claude-opus-5", pattern=ROUTE_PATTERN
+    )
+    model_request_timeout_seconds: int = Field(default=180, ge=5, le=900)
+    #: Model turns one run may take before it is stopped.
+    model_max_turns: int = Field(default=8, ge=1, le=50)
+    #: Per organization, per process (see app/core/rate_limit.py).
+    model_requests_per_minute_per_org: int = Field(default=30, ge=1)
+    #: Per organization per UTC day, across every run, counted from the ledger.
+    model_daily_token_limit_per_org: int = Field(default=2_000_000, ge=1_000)
+
+    @field_validator("anthropic_api_key", "openai_api_key", mode="before")
+    @classmethod
+    def _blank_key_means_unset(cls, value: object) -> object:
+        # `ANTHROPIC_API_KEY=` in a .env file is "not configured", not an empty key.
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
 
     # --- Runtime ------------------------------------------------------------
     # Run the execution worker inside the API process. Turn it off to run

@@ -215,7 +215,7 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
       return respond(agent);
     },
 
-    requestExecution(id) {
+    requestExecution(id, input) {
       const agent = findAgent(id);
       if (!agent) return fail('Agent not found.');
       if (agent.status !== 'active') {
@@ -229,6 +229,9 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
         status: 'QUEUED',
         trigger: 'manual',
         runtime: 'simulation',
+        mode: 'simulated',
+        modelRoute: null,
+        estimatedCostUsd: null,
         startedAt: new Date().toISOString(),
         endedAt: null,
         durationMs: null,
@@ -246,6 +249,8 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
         pendingApprovals: 0,
       };
       executions.unshift(execution);
+      const task = input?.trim();
+      if (task) demoInputs.set(execution.id, task);
       return respond(execution);
     },
   };
@@ -428,8 +433,12 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
 
   const approvals: Approval[] = [];
 
+  // Tasks typed into the run dialog, shown back on the execution page.
+  const demoInputs = new Map<string, string>();
+
   const detailOfExecution = (execution: Execution) => ({
     ...buildDemoExecutionDetail(execution),
+    input: demoInputs.get(execution.id) ?? null,
     approvals: approvals.filter((approval) => approval.executionId === execution.id),
   });
 
@@ -482,6 +491,24 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     },
   };
 
+  // Demo mode has no backend, so no provider: it says so rather than
+  // presenting routes as live.
+  const demoModelStatus = {
+    enabled: true,
+    providers: [
+      { name: 'anthropic', configured: false },
+      { name: 'openai', configured: false },
+    ],
+    routes: [
+      { tier: 'fast-small', provider: 'anthropic', model: 'claude-haiku-4-5', available: false },
+      { tier: 'balanced-large', provider: 'anthropic', model: 'claude-sonnet-5', available: false },
+      { tier: 'reasoning-large', provider: 'anthropic', model: 'claude-opus-5', available: false },
+    ],
+    limits: { requestsPerMinute: 30, dailyTokenLimit: 2_000_000, maxTurns: 8, timeoutSeconds: 180 },
+    usageToday: { requests: 0, tokens: 0, estimatedCostUsd: 0 },
+    detail: 'Demo mode has no backend, so no model is called and every run is simulated.',
+  };
+
   const demoSandboxStatus = {
     enabled: true,
     available: false,
@@ -517,6 +544,9 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     // rather than showing isolation checks that never ran.
     sandbox() {
       return respond(demoSandboxStatus);
+    },
+    models() {
+      return respond(demoModelStatus);
     },
     checkSandbox() {
       return respond({

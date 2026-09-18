@@ -12,14 +12,20 @@ import { Input } from '@/components/ui/Input';
 import { usePermission } from '@/features/auth/api';
 import {
   useCheckSandbox,
+  useModelGatewayStatus,
   useRuntimeState,
   useSandboxStatus,
   useSetExecutionsPaused,
 } from '@/features/executions/api';
 import { SandboxChecks } from '@/features/executions/components/SandboxChecks';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatNumber } from '@/lib/format';
 import { toast } from '@/stores/toastStore';
-import type { RuntimeState, SandboxReport, SandboxStatus } from '@/types/domain';
+import type {
+  ModelGatewayStatus,
+  RuntimeState,
+  SandboxReport,
+  SandboxStatus,
+} from '@/types/domain';
 
 /**
  * The kill switch. Deliberately asymmetric: any administrator can stop
@@ -149,6 +155,8 @@ function RuntimeControls({ state }: { state: RuntimeState }) {
         </CardBody>
       </Card>
 
+      <ModelGatewaySettings />
+
       <SandboxSettings />
 
       <Card>
@@ -162,15 +170,16 @@ function RuntimeControls({ state }: { state: RuntimeState }) {
             declared, pauses for human approval and records everything.
           </p>
           <p>
-            Before a run starts, it creates an isolated container and checks it. A run is marked{' '}
-            <code className="font-mono text-xs">sandbox</code> only when every isolation check
-            passes; a container that fails a check fails the run. Without a container runtime, runs
-            are marked <code className="font-mono text-xs">simulation</code>.
+            When a model provider is configured for an agent's tier, a{' '}
+            <strong className="font-medium text-fg">real model</strong> answers each run through the
+            model gateway, which enforces per-organization rate and daily token limits and records
+            every request. Otherwise the run is <code className="font-mono text-xs">simulated</code>.
           </p>
           <p>
-            Either way it <strong className="font-medium text-fg">executes nothing</strong>. There
-            is no model gateway yet, so no agent code runs inside the container, no model is called
-            and no tool is invoked. Tool calls are recorded as simulated rather than succeeded.
+            Tools the model asks for are checked against the agent's permissions and approvals, and
+            then <strong className="font-medium text-fg">not executed</strong>: no tool has an
+            implementation yet. Each run also gets an isolated container, checked before it starts;
+            nothing runs inside it.
           </p>
           {state.pendingApprovals > 0 && (
             <p className="text-fg">
@@ -292,6 +301,101 @@ function SandboxControls({ status }: { status: SandboxStatus }) {
       </Button>
 
       {report && <SandboxChecks report={report} />}
+    </div>
+  );
+}
+
+/** Which tiers a real model answers, what limits apply, and what was used today. */
+function ModelGatewaySettings() {
+  const query = useModelGatewayStatus();
+
+  return (
+    <Card>
+      <CardHeader
+        title="Model gateway"
+        description="How runs reach a language model. Credentials stay on the server."
+      />
+      <CardBody>
+        <QueryState
+          query={query}
+          loading={<LoadingState variant="inline" label="Loading model gateway…" />}
+          errorTitle="Model gateway status could not be loaded"
+        >
+          {(status) => <ModelGatewayDetails status={status} />}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+function ModelGatewayDetails({ status }: { status: ModelGatewayStatus }) {
+  const live = status.routes.some((route) => route.available);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-fg-muted">{status.detail}</p>
+        <Badge tone={live ? 'success' : 'warning'}>{live ? 'Models available' : 'Simulated only'}</Badge>
+      </div>
+
+      <ul className="flex flex-wrap gap-2" aria-label="Providers">
+        {status.providers.map((provider) => (
+          <li key={provider.name}>
+            <Badge tone={provider.configured ? 'success' : 'neutral'}>
+              {provider.name}: {provider.configured ? 'configured' : 'no credentials'}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+
+      <table className="w-full text-left text-sm">
+        <caption className="sr-only">Model routes by tier</caption>
+        <thead>
+          <tr className="text-xs text-fg-subtle">
+            <th scope="col" className="py-1 pr-3 font-normal">Tier</th>
+            <th scope="col" className="py-1 pr-3 font-normal">Answered by</th>
+            <th scope="col" className="py-1 font-normal">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {status.routes.map((route) => (
+            <tr key={route.tier} className="border-t border-border">
+              <td className="py-1.5 pr-3 font-mono text-xs">{route.tier}</td>
+              <td className="py-1.5 pr-3 font-mono text-xs break-all">
+                {route.provider}:{route.model}
+              </td>
+              <td className="py-1.5">
+                <Badge tone={route.available ? 'success' : 'neutral'}>
+                  {route.available ? 'Live' : 'Simulated'}
+                </Badge>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+        {(
+          [
+            ['Requests per minute', formatNumber(status.limits.requestsPerMinute)],
+            ['Daily token limit', formatNumber(status.limits.dailyTokenLimit)],
+            ['Model turns per run', String(status.limits.maxTurns)],
+            ['Request timeout', `${status.limits.timeoutSeconds}s`],
+            ['Requests today', formatNumber(status.usageToday.requests)],
+            ['Tokens today', formatNumber(status.usageToday.tokens)],
+            ['Estimated spend today', `$${status.usageToday.estimatedCostUsd.toFixed(4)}`],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label} className="min-w-0">
+            <dt className="text-xs text-fg-subtle">{label}</dt>
+            <dd className="text-sm text-fg">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-xs text-fg-subtle">
+        Spend is estimated from published prices and excludes models without a price entry. The
+        provider's bill is authoritative.
+      </p>
     </div>
   );
 }

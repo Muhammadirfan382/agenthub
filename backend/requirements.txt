@@ -6,6 +6,11 @@
 #   sqlalchemy         database toolkit and async ORM
 #   asyncpg            async PostgreSQL driver used in staging and production
 #   alembic            versioned schema migrations
+#   anthropic          official Anthropic SDK: the Claude adapter behind the model
+#                      gateway (streaming, typed errors, retries). Server-side only.
+#   openai             official OpenAI SDK: the OpenAI adapter behind the model
+#                      gateway, used only when a tier is routed to openai:<model>.
+#                      Both SDKs share httpx2, already used by the test suite.
 fastapi==0.141.1
 pydantic==2.13.5
 pydantic-settings==2.15.0
@@ -13,3 +18,5 @@ uvicorn==0.53.0
 sqlalchemy==2.0.54
 asyncpg==0.31.0
 alembic==1.20.0
+anthropic==1.6.0
+openai==3.15.0

@@ -14,6 +14,7 @@ from app.schemas.common import CamelModel
 from app.schemas.enums import (
     ApprovalDecision,
     ApprovalStatus,
+    ExecutionMode,
     ExecutionRuntime,
     ExecutionStatus,
     ExecutionTrigger,
@@ -44,6 +45,11 @@ class ExecutionRead(CamelModel):
     status: ExecutionStatus
     trigger: ExecutionTrigger
     runtime: ExecutionRuntime
+    mode: ExecutionMode
+    #: provider:model the run's tier resolved to; null for simulated runs.
+    model_route: str | None = None
+    #: Estimated model spend in US dollars; null when nothing priced was called.
+    estimated_cost_usd: float | None = None
     started_at: datetime
     ended_at: datetime | None
     duration_ms: int | None
@@ -143,8 +149,34 @@ class ExecutionError(CamelModel):
     message: str
 
 
+class ConversationToolCall(CamelModel):
+    id: str
+    name: str
+    #: What the model asked for, as bounded JSON text. Untrusted, never run.
+    arguments: str
+
+
+class ConversationToolResult(CamelModel):
+    call_id: str
+    content: str
+    is_error: bool
+
+
+class ConversationTurn(CamelModel):
+    """One message in a model-driven run. Model text is data: render it as text."""
+
+    role: str
+    text: str
+    tool_calls: list[ConversationToolCall] = Field(default_factory=list)
+    tool_results: list[ConversationToolResult] = Field(default_factory=list)
+
+
 class ExecutionDetailRead(ExecutionRead):
     """Execution with everything the runtime recorded for it."""
+
+    #: What the requester asked the agent to do.
+    input: str | None = None
+    conversation: list[ConversationTurn] = Field(default_factory=list)
 
     timeline: list[TimelineEvent] = Field(default_factory=list)
     logs: list[LogEntry] = Field(default_factory=list)
@@ -160,6 +192,9 @@ class ExecutionRequest(CamelModel):
     """Optional body when requesting an execution."""
 
     trigger: ExecutionTrigger = "manual"
+    #: What the agent should do this time. Untrusted input, passed to the model
+    #: as the user's message - never as instructions to the platform.
+    input: Annotated[str, StringConstraints(strip_whitespace=True, max_length=8000)] | None = None
 
 
 class ApprovalDecisionRequest(CamelModel):

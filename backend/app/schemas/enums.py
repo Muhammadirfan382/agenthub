@@ -40,16 +40,23 @@ ExecutionStatus = Literal[
     "CANCELLED",
     "TIMEOUT",
 ]
-# What produced a run.
-#   simulation - no container was involved; the run was recorded only.
+# Whether a verified container was created for a run.
+#   simulation - no container was involved.
 #   sandbox    - an isolated container was created and verified for this run.
-# Neither executes agent code: the model gateway that would give an agent
-# something to do arrives in Phase 7.
+# Nothing executes inside it in either case.
 ExecutionRuntime = Literal["simulation", "sandbox"]
+# Who drove a run.
+#   model     - a real model answered through the model gateway.
+#   simulated - no provider was configured; the scripted plan was recorded.
+ExecutionMode = Literal["model", "simulated"]
 TimelineKind = Literal["lifecycle", "model", "tool", "policy", "error", "result"]
 LogLevel = Literal["debug", "info", "warn", "error"]
-#: A tool call is never "succeeded" while the runtime is a simulation.
-ToolCallStatus = Literal["pending", "simulated", "denied", "failed"]
+#: Never "succeeded": no tool is executed in this release.
+#:   unavailable - allowed by every check, but no implementation exists to run it.
+#:   simulated   - recorded by the scripted plan of a simulated run.
+#:   denied      - refused by policy or by a person.
+#:   failed      - rejected, e.g. arguments that did not match the tool's schema.
+ToolCallStatus = Literal["pending", "simulated", "unavailable", "denied", "failed"]
 ApprovalStatus = Literal["pending", "approved", "denied"]
 ApprovalDecision = Literal["approved", "denied"]
 ExecutionTrigger = Literal["manual", "schedule", "api"]

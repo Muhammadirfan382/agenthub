@@ -75,6 +75,11 @@ variable is available unless it has been deliberately granted.
   asserted by `backend/tests/test_sandbox_spec.py`. Never weaken either to make
   something work: no mounts, no `--env`, no socket, no added capabilities, no
   network. A container that fails an isolation check must fail its run.
+- Every model call goes through `backend/app/llm/gateway.py`, and every tool
+  call a model makes through `backend/app/runtime/tools.py`. Never call a
+  provider SDK from anywhere else, never log a prompt, an answer or a key, and
+  never execute a tool until egress controls exist. Tests must not reach a real
+  provider.
 
 ## 4. Dependencies
 

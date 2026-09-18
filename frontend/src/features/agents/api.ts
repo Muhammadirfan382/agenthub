@@ -60,7 +60,8 @@ export function useRequestExecution() {
   const { agents } = useServices();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => agents.requestExecution(id),
+    mutationFn: ({ id, input }: { id: string; input?: string }) =>
+      agents.requestExecution(id, input),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.executions.all }),

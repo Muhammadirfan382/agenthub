@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 #: A run whose worker has not been heard from for this long is up for grabs.
 STALE_CLAIM_SECONDS = 60
 POLL_SECONDS = 1.0
+#: How often a busy worker proves it is alive while a step waits on a model.
+HEARTBEAT_SECONDS = 15.0
+#: Claims a run may take. A run that keeps killing its worker is failed, not retried forever.
+MAX_ATTEMPTS = 3
 
 
 def worker_name() -> str:
@@ -102,6 +106,15 @@ async def run_once(
         # attribute back off it would need the very session that just failed.
         execution_id = execution.id
 
+        if execution.attempt > MAX_ATTEMPTS:
+            await _give_up(session, execution)
+            return True
+
+        # A claim is committed before any work starts, so no other worker takes it.
+        await session.commit()
+        heartbeat = asyncio.create_task(
+            _keep_alive(session_factory, execution_id=execution_id, worker=worker)
+        )
         try:
             outcome = await run_to_completion(session, execution, settings=settings)
             await session.commit()
@@ -121,7 +134,48 @@ async def run_once(
                 )
                 await recovery.commit()
             logger.exception("execution step failed", extra={"execution_id": execution_id})
+        finally:
+            heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
         return True
+
+
+async def _keep_alive(
+    session_factory: async_sessionmaker[AsyncSession], *, execution_id: str, worker: str
+) -> None:
+    """Refreshes the claim while a step is busy, e.g. waiting minutes on a model.
+
+    Without it a long model call would look like a dead worker, and a second
+    worker would reclaim the run and pay for the same call again.
+    """
+    while True:
+        await asyncio.sleep(HEARTBEAT_SECONDS)
+        try:
+            async with session_factory() as beat:
+                await beat.execute(
+                    update(Execution)
+                    .where(Execution.id == execution_id, Execution.claimed_by == worker)
+                    .values(heartbeat_at=now_utc())
+                )
+                await beat.commit()
+        except Exception:  # a missed beat is not worth killing the run over
+            logger.warning("heartbeat failed", extra={"execution_id": execution_id})
+
+
+async def _give_up(session: AsyncSession, execution: Execution) -> None:
+    """Fails a run that has already cost too many workers."""
+    now = now_utc()
+    execution.status = "FAILED"
+    execution.error_code = "worker_retries"
+    execution.error_message = (
+        f"Stopped after {MAX_ATTEMPTS} attempts: the run kept failing inside the worker."
+    )
+    execution.ended_at = now
+    execution.claimed_by = None
+    execution.heartbeat_at = None
+    await session.commit()
+    logger.error("execution abandoned", extra={"execution_id": execution.id})
 
 
 async def work_loop(
