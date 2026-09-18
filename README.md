@@ -29,9 +29,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 3 | Authentication and RBAC | ✅ Complete |
 | 4 | Agent registry: manifests, versions, marketplace, installs | ✅ Complete |
 | 5 | Agent runtime: orchestration, approvals, budgets, kill switch | ✅ Complete |
-| 6–10 | Sandbox, LLM, security, monitoring, deployment | ⏳ Not started |
+| 6 | Docker sandbox: isolated, verified containers per run | ✅ Complete (real-container tests run in CI only) |
+| 7–10 | LLM, security, monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–5):**
+**What exists today (Phases 0–6):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -46,13 +47,14 @@ aims to make that safe to do inside an organization by combining two things:
   - Password sign-in, server-side sessions in HttpOnly cookies, CSRF protection, sign-in throttling, organizations with memberships, and four roles (viewer, member, admin, owner) enforced on every endpoint.
   - An agent registry: publishing freezes a manifest as an immutable version, visibility decides who sees it in the marketplace, and installing it into another organization grants only what that organization chooses - never more than the manifest asked for, and nothing by default.
   - An execution runtime that orchestrates runs: a durable queue and worker, per-run budgets for time, tokens and tool calls, pauses for human approval, cancellation, an organization-wide kill switch, and a recorded timeline, logs and tool calls streamed to the UI.
-  - **Nothing is executed.** No agent code runs, no model is called and no tool is invoked: the sandbox and the model gateway do not exist yet, so every run is marked `simulation` and its tool calls are recorded as `simulated`, never as succeeded.
+  - A sandbox: before each run the runtime starts an ephemeral, non-root, read-only, capability-free, network-less and resource-limited container, checks 13 isolation guarantees from inside it, records the result on the run, and fails the run if any guarantee does not hold. Without a container runtime, runs are recorded as simulations, or refused when `REQUIRE_SANDBOX=true`.
+  - **Nothing is executed.** No agent code runs, no model is called and no tool is invoked: the model gateway does not exist yet, so nothing runs inside the sandbox and tool calls are recorded as `simulated`, never as succeeded.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
-email verification), an audit log, actual agent execution, sandboxing, LLM
-integration, scheduled triggers, real security scanning (the verification label
+email verification), an audit log, actual agent execution, an egress
+gateway, LLM integration, scheduled triggers, real security scanning (the verification label
 is stored, not earned), monitoring and deployment.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
@@ -95,7 +97,7 @@ which parts exist today and which are planned, are in
 | npm | 10+ | 11.13.0 | Frontend |
 | Python | 3.12+ | 3.14.3 | Backend |
 | pip | recent | 26.0.1 | Backend |
-| Docker Desktop (with Compose v2) | any recent | not installed | **Optional.** Only to run PostgreSQL locally; development defaults to a SQLite file. Required later for agent sandboxes. |
+| Docker Desktop (with Compose v2) | any recent | not installed | **Optional.** To run PostgreSQL locally, and to give runs a real sandbox (`docker build -t agenthub/sandbox:0.6.0 agents/sandbox`). Without it, development uses a SQLite file and runs are recorded as simulations. |
 
 ## Running AgentHub locally (Windows PowerShell)
 
@@ -238,8 +240,9 @@ Full descriptions: [docs/ROADMAP.md](docs/ROADMAP.md).
 - **Agents, tools and models are untrusted.** Their inputs and outputs are validated
   and never treated as instructions to the platform.
 - **Isolation.** Agent code will run only inside sandboxes with no host access, no
-  ambient credentials and limited resources. Until the sandbox exists, agents are
-  not executed.
+  ambient credentials and limited resources. The sandbox exists and is checked
+  before every run; until the model gateway gives agents something to do,
+  nothing is executed inside it.
 - **No secrets in code, Git or the browser.** Configuration comes from the
   environment; real values live outside the repository.
 - **Honesty over appearance.** Placeholder or mocked functionality is labelled as

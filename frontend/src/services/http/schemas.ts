@@ -6,6 +6,9 @@ import type {
   Execution,
   ExecutionDetail,
   RuntimeState,
+  SandboxCheckResult,
+  SandboxReport,
+  SandboxStatus,
 } from '@/types/domain';
 
 /**
@@ -119,7 +122,7 @@ const executionShape = {
   agentName: z.string(),
   status: executionStatus,
   trigger,
-  runtime: z.literal('simulation'),
+  runtime: z.enum(['simulation', 'sandbox']),
   startedAt: iso,
   endedAt: iso.nullable(),
   durationMs: z.number().nullable(),
@@ -158,9 +161,39 @@ export const RuntimeStateSchema: z.ZodType<RuntimeState> = z.object({
 });
 export const ExecutionSchema: z.ZodType<Execution> = z.object(executionShape);
 
+export const SandboxReportSchema: z.ZodType<SandboxReport> = z.object({
+  passed: z.boolean(),
+  summary: z.string(),
+  checks: z.array(
+    z.object({ id: z.string(), label: z.string(), passed: z.boolean(), detail: z.string() }),
+  ),
+});
+
+const sandboxStatusShape = {
+  enabled: z.boolean(),
+  available: z.boolean(),
+  command: z.string(),
+  image: z.string(),
+  memoryMb: z.number(),
+  cpus: z.number(),
+  pidsLimit: z.number(),
+  tmpfsMb: z.number(),
+  timeoutSeconds: z.number(),
+  required: z.boolean(),
+  detail: z.string(),
+};
+
+export const SandboxStatusSchema: z.ZodType<SandboxStatus> = z.object(sandboxStatusShape);
+
+export const SandboxCheckResultSchema: z.ZodType<SandboxCheckResult> = z.object({
+  ...sandboxStatusShape,
+  report: SandboxReportSchema.nullable(),
+});
+
 export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
   ...executionShape,
   approvals: z.array(ApprovalSchema),
+  sandboxReport: SandboxReportSchema.nullable(),
   timeline: z.array(
     z.object({
       id,

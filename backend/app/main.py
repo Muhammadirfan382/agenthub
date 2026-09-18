@@ -55,7 +55,12 @@ def create_app(
         worker: asyncio.Task[None] | None = None
         if resolved.runtime_worker_enabled:
             worker = asyncio.create_task(
-                work_loop(app.state.session_factory, worker=worker_name(), stop=stop)
+                work_loop(
+                    app.state.session_factory,
+                    worker=worker_name(),
+                    stop=stop,
+                    settings=resolved,
+                )
             )
         try:
             yield

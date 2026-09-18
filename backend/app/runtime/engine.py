@@ -1,14 +1,16 @@
 """The execution engine: one run, one step at a time.
 
 What is real here: the state machine, the budget, the approval pauses, the
-cancellation checks, the kill switch, and the record of everything that
-happened. What is *not* real: the work itself. No agent code runs, no model is
-called and no tool is invoked, because neither the sandbox (Phase 6) nor the
-model gateway (Phase 7) exists.
+cancellation checks, the kill switch, the sandbox the run is given, and the
+record of everything that happened.
 
-Every run therefore records `runtime = "simulation"`, every simulated step says
-so in its own text, and tool calls are recorded as `simulated` rather than
-`succeeded`. Nothing in the database can be mistaken for work that happened.
+What is still *not* real is the work itself. A run now starts a genuinely
+isolated container (Phase 6) and refuses to continue if that container does not
+hold — but nothing is executed inside it, because no agent program exists until
+the model gateway arrives (Phase 7). Tool calls are therefore recorded as
+`simulated` rather than `succeeded`, and `runtime` says which of the two
+happened: `sandbox` when a verified container was created for the run,
+`simulation` when none was available.
 """
 
 import logging
@@ -19,6 +21,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.time import ensure_utc, now_utc
 from app.db.models import (
     Agent,
@@ -30,6 +33,8 @@ from app.db.models import (
     Organization,
 )
 from app.runtime.plan import Step, build_plan
+from app.runtime.sandbox import get_sandbox
+from app.sandbox import build_spec
 from app.schemas.enums import ExecutionStatus, LogLevel, TimelineKind
 
 logger = logging.getLogger(__name__)
@@ -336,7 +341,84 @@ async def _run_tool_step(
     return StepOutcome(status="RUNNING", finished=False)
 
 
-async def advance(session: AsyncSession, execution: Execution) -> StepOutcome:
+async def prepare_sandbox(
+    session: AsyncSession, execution: Execution, recorder: ExecutionRecorder, settings: Settings
+) -> StepOutcome | None:
+    """Creates and checks the box this run would execute in.
+
+    Three outcomes, all recorded rather than assumed:
+
+    * The container starts and every isolation check passes. The run continues
+      with `runtime = "sandbox"`.
+    * The container starts and something is wrong. The run **fails**: a box
+      that does not hold is worse than no box, because it looks like one.
+    * No container runtime is available. With `REQUIRE_SANDBOX` on the run
+      fails; otherwise it continues as a recorded simulation, and says so.
+    """
+    sandbox = get_sandbox(settings)
+    spec = build_spec(
+        image=settings.sandbox_image,
+        execution_id=execution.id,
+        organization_id=execution.organization_id,
+        memory_mb=settings.sandbox_memory_mb,
+        cpus=settings.sandbox_cpus,
+        pids_limit=settings.sandbox_pids_limit,
+        tmpfs_mb=settings.sandbox_tmpfs_mb,
+        timeout_seconds=settings.sandbox_timeout_seconds,
+    )
+
+    result = await sandbox.probe(spec)
+    execution.sandbox_report = result.report.as_dict()
+
+    if result.isolated:
+        execution.runtime = "sandbox"
+        await recorder.event(
+            "lifecycle",
+            "Sandbox verified",
+            detail=(
+                f"{settings.sandbox_image}: {result.report.summary()}. "
+                "Nothing ran inside it: no agent program exists yet."
+            ),
+        )
+        await recorder.log("info", f"Sandbox ready: {result.report.summary()}.")
+        return None
+
+    if result.started:
+        # A container existed and failed its own checks. Do not continue.
+        failures = ", ".join(check.label for check in result.report.failures)
+        await recorder.event("policy", "Sandbox rejected", detail=failures)
+        return await _fail(
+            recorder,
+            execution,
+            status="FAILED",
+            code="sandbox_unsafe",
+            message=f"The sandbox did not hold: {failures}.",
+        )
+
+    reason = result.error or "No container runtime is available."
+    if settings.require_sandbox:
+        await recorder.event("policy", "Refused to run without a sandbox", detail=reason)
+        return await _fail(
+            recorder,
+            execution,
+            status="FAILED",
+            code="sandbox_unavailable",
+            message=f"REQUIRE_SANDBOX is on and no sandbox could be created: {reason}",
+        )
+
+    execution.runtime = RUNTIME_NAME
+    await recorder.event(
+        "lifecycle",
+        "No sandbox available",
+        detail=(f"{reason} This run is recorded by the simulation runtime and executes nothing."),
+    )
+    await recorder.log("warn", f"Running without a sandbox: {reason}")
+    return None
+
+
+async def advance(
+    session: AsyncSession, execution: Execution, *, settings: Settings | None = None
+) -> StepOutcome:
     """Runs one step of one execution and records what it did."""
     recorder = ExecutionRecorder(session, execution)
     execution.heartbeat_at = now_utc()
@@ -371,15 +453,12 @@ async def advance(session: AsyncSession, execution: Execution) -> StepOutcome:
 
     if step.kind == "prepare":
         execution.status = "STARTING"
-        await recorder.event(
-            "lifecycle",
-            "Execution started",
-            detail=(
-                "No sandbox exists yet, so this run is recorded by the simulation "
-                "runtime instead of executing agent code."
-            ),
-        )
-        await recorder.log("info", f"Runtime: {RUNTIME_NAME}.")
+        await recorder.event("lifecycle", "Execution started")
+
+        refused = await prepare_sandbox(session, execution, recorder, settings or get_settings())
+        if refused is not None:
+            return refused
+
         execution.step_index += 1
         execution.status = "RUNNING"
         return StepOutcome(status="RUNNING", finished=False)
@@ -409,12 +488,16 @@ async def advance(session: AsyncSession, execution: Execution) -> StepOutcome:
 
 
 async def run_to_completion(
-    session: AsyncSession, execution: Execution, *, max_steps: int = 100
+    session: AsyncSession,
+    execution: Execution,
+    *,
+    max_steps: int = 100,
+    settings: Settings | None = None,
 ) -> StepOutcome:
     """Advances until the run finishes, pauses for approval, or hits max_steps."""
     outcome = StepOutcome(status=execution.status, finished=False)  # type: ignore[arg-type]
     for _ in range(max_steps):
-        outcome = await advance(session, execution)
+        outcome = await advance(session, execution, settings=settings)
         await session.flush()
         if outcome.finished or outcome.paused:
             return outcome

@@ -99,6 +99,45 @@ class ApprovalRead(CamelModel):
     automatic: bool
 
 
+class SandboxCheck(CamelModel):
+    id: str
+    label: str
+    passed: bool
+    detail: str
+
+
+class SandboxReport(CamelModel):
+    """What the container reported about its own isolation."""
+
+    passed: bool
+    summary: str
+    checks: list[SandboxCheck]
+
+
+class SandboxStatus(CamelModel):
+    """Whether runs can be isolated here, and how."""
+
+    enabled: bool
+    available: bool
+    #: The CLI the backend would use: docker, podman, anything compatible.
+    command: str
+    image: str
+    memory_mb: int
+    cpus: float
+    pids_limit: int
+    tmpfs_mb: int
+    timeout_seconds: int
+    #: When true, a run refuses to start unless it gets a verified sandbox.
+    required: bool
+    detail: str
+
+
+class SandboxCheckResult(SandboxStatus):
+    """A status plus the result of actually starting a container."""
+
+    report: SandboxReport | None = None
+
+
 class ExecutionError(CamelModel):
     code: str
     message: str
@@ -111,6 +150,8 @@ class ExecutionDetailRead(ExecutionRead):
     logs: list[LogEntry] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     approvals: list[ApprovalRead] = Field(default_factory=list)
+    #: Present when a container was created for this run and checked.
+    sandbox_report: SandboxReport | None = None
     error: ExecutionError | None = None
     result: str | None = None
 

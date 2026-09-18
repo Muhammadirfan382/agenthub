@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.security import DEFAULT_COST_EXPONENT, MIN_PRODUCTION_COST_EXPONENT
@@ -18,7 +18,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 API_V1_PREFIX = "/api/v1"
 SERVICE_NAME = "agenthub-backend"
-SERVICE_VERSION = "0.5.0"
+SERVICE_VERSION = "0.6.0"
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -62,6 +62,30 @@ class Settings(BaseSettings):
     # scrypt work factor for new passwords (n = 2 ** exponent). Lowered only
     # in tests; production refuses anything weaker than the minimum.
     password_hash_cost_exponent: int = DEFAULT_COST_EXPONENT
+
+    # --- Sandbox (Phase 6) ---------------------------------------------------
+    # Agent execution belongs inside a container. Until one is available the
+    # runtime records runs instead of executing anything; see app/sandbox.
+    sandbox_enabled: bool = True
+    #: The CLI used to start containers: `docker`, or anything compatible.
+    sandbox_command: str = "docker"
+    #: Always pinned to a tag. See agents/sandbox/Dockerfile.
+    #: Must end in a tag or digest; may name a registry with a port. No
+    #: whitespace and no leading "-", so it can never be read as a flag.
+    sandbox_image: str = Field(
+        default="agenthub/sandbox:0.6.0", pattern=r"^[A-Za-z0-9][^\s]*:[^\s:/]+$"
+    )
+    # The same floors app/sandbox/spec.py enforces, checked at startup: a bad
+    # value should stop the process, not fail every run it later picks up.
+    sandbox_memory_mb: int = Field(default=512, ge=64)
+    sandbox_cpus: float = Field(default=1.0, gt=0)
+    sandbox_pids_limit: int = Field(default=128, ge=8)
+    sandbox_tmpfs_mb: int = Field(default=64, ge=1)
+    sandbox_timeout_seconds: int = Field(default=60, gt=0)
+    #: Refuse to run at all when the sandbox cannot be verified. Off by default
+    #: so a machine without a container runtime still records runs honestly;
+    #: turn it on where nothing may run unless it is provably isolated.
+    require_sandbox: bool = False
 
     # --- Runtime ------------------------------------------------------------
     # Run the execution worker inside the API process. Turn it off to run

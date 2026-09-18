@@ -153,6 +153,8 @@ export function buildDemoExecutionDetail(execution: Execution): ExecutionDetail 
   return {
     ...execution,
     approvals: [],
+    // Demo runs never had a container: no report is invented for them.
+    sandboxReport: null,
     timeline,
     logs,
     toolCalls,

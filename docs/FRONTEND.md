@@ -139,6 +139,22 @@ authorization control.
   A 404 on a detail request becomes `null`; other failures raise `ApiError`
   carrying the backend's own `code` and `message`.
 
+### The sandbox (Phase 6)
+
+- **Settings → Runtime → Execution sandbox** shows the configured image and
+  limits and whether a container runtime answers, and says in so many words
+  when runs are not isolated. Administrators can **Run isolation check**, which
+  starts one throwaway container and lists every guarantee it kept or broke.
+- **The execution page** has a *Runtime* row (`Sandbox` or `Simulation`) and a
+  *Sandbox* card listing the checks recorded for that run. A run with no
+  report says that nothing about its isolation is claimed.
+- `SandboxChecks` renders a report in both places; a broken check names the
+  promise and the reason, and carries a screen-reader suffix rather than
+  relying on colour.
+- **Demo mode** has no container runtime and says so: its check reports one
+  failed guarantee (no runtime) rather than inventing a pass, and demo runs
+  carry no sandbox report.
+
 ### Watching and controlling a run (Phase 5)
 
 - **Live updates:** `useExecutionStream` subscribes to the server's event
@@ -153,8 +169,9 @@ authorization control.
 - **The kill switch** lives in Settings → Runtime, and `RuntimeBanner` repeats
   the state anywhere executions are listed, so nobody wonders why nothing is
   starting.
-- **Honesty:** the execution page states that the runtime executed nothing, and
-  tool calls are labelled *Simulated*, never *Succeeded*.
+- **Honesty:** the execution page states that the runtime executed nothing —
+  inside a verified sandbox or without one — and tool calls are labelled
+  *Simulated*, never *Succeeded*.
 
 ### The registry (Phase 4)
 

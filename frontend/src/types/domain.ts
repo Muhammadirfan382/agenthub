@@ -256,10 +256,11 @@ export function isExecutionFinished(status: ExecutionStatus): boolean {
 }
 
 /**
- * What produced a run. Only `simulation` exists: there is no sandbox and no
- * model gateway yet, so no agent code is executed.
+ * What produced a run: `sandbox` when a verified, isolated container was
+ * created for it, `simulation` when none was available. In neither case does
+ * agent code execute yet — there is no model gateway to give it anything to do.
  */
-export type ExecutionRuntime = 'simulation';
+export type ExecutionRuntime = 'simulation' | 'sandbox';
 
 export interface ExecutionBudget {
   maxRuntimeSeconds: number;
@@ -359,11 +360,48 @@ export interface ExecutionError {
   message: string;
 }
 
+/** One isolation guarantee, and whether the container kept it. */
+export interface SandboxCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+/** What a container reported about its own isolation, check by check. */
+export interface SandboxReport {
+  passed: boolean;
+  summary: string;
+  checks: SandboxCheck[];
+}
+
+/** Whether runs can be isolated here, and with what limits. */
+export interface SandboxStatus {
+  enabled: boolean;
+  available: boolean;
+  command: string;
+  image: string;
+  memoryMb: number;
+  cpus: number;
+  pidsLimit: number;
+  tmpfsMb: number;
+  timeoutSeconds: number;
+  /** When true, a run is refused unless it gets a verified sandbox. */
+  required: boolean;
+  detail: string;
+}
+
+export interface SandboxCheckResult extends SandboxStatus {
+  report: SandboxReport | null;
+}
+
 export interface ExecutionDetail extends Execution {
   timeline: TimelineEvent[];
   logs: LogEntry[];
   toolCalls: ToolCall[];
   approvals: Approval[];
+  /** Present when a container was created for this run and checked. */
+  sandboxReport: SandboxReport | null;
   error: ExecutionError | null;
   result: string | null;
 }

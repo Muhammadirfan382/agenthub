@@ -2,12 +2,13 @@
 
 FastAPI service for agents and executions, backed by SQLAlchemy and Alembic.
 
-**Status (Phase 5).** Persists organizations, users, memberships, sessions,
+**Status (Phase 6).** Persists organizations, users, memberships, sessions,
 agents, published versions, marketplace listings, installations, executions and
 everything a run records. Every endpoint except the health check and sign-in
-requires a session, and every action is checked against a role. A runtime now orchestrates
-executions, but **executes nothing**: no sandbox exists yet, so no agent code,
-model or tool is actually run (see §6). Treat it as pre-release software — it has never been deployed, audited or
+requires a session, and every action is checked against a role. A runtime
+orchestrates executions and gives each one an isolated, verified container
+(§7), but **executes nothing** inside it: there is no model gateway yet, so no
+agent code, model or tool is actually run (see §6). Treat it as pre-release software — it has never been deployed, audited or
 run against real data.
 
 ---
@@ -26,11 +27,13 @@ backend/
 │   ├── repositories/       Queries (no business rules)
 │   ├── schemas/            Pydantic request/response models and enums
 │   ├── runtime/            Plan, engine and worker (orchestration only)
+│   ├── sandbox/            Container spec, runner and isolation report
 │   ├── services/           Business rules, authorization matrix, risk scoring
 │   └── main.py             create_app() application factory
 ├── scripts/create_user.py  Creates an account; there is no public sign-up
 ├── scripts/seed_demo.py    Demonstration data
 └── tests/                  pytest suite
+agents/sandbox/           The sandbox image and its in-container probe
 database/migrations/      Alembic environment and versions
 infrastructure/compose/   Local PostgreSQL (docker-compose.yml)
 ```
@@ -56,6 +59,18 @@ default.
 | `LOGIN_WINDOW_MINUTES` | `15` | The window both limits use. |
 | `PASSWORD_HASH_COST_EXPONENT` | `15` | scrypt work factor (n = 2^exponent). Production refuses below 14. |
 | `RUNTIME_WORKER_ENABLED` | `true` | Run the execution worker inside the API process. Turn off when running `python -m app.runtime.worker` separately. |
+| `SANDBOX_ENABLED` | `true` | Give each run a container. Off means every run is a recorded simulation. |
+| `SANDBOX_COMMAND` | `docker` | The container CLI: `docker`, or anything compatible with its `run` arguments. |
+| `SANDBOX_IMAGE` | `agenthub/sandbox:0.6.0` | Must carry a tag or digest; may name a registry. |
+| `SANDBOX_MEMORY_MB` | `512` | Memory per container, with no swap. At least 64. |
+| `SANDBOX_CPUS` | `1.0` | CPU share per container. |
+| `SANDBOX_PIDS_LIMIT` | `128` | Processes per container. At least 8. |
+| `SANDBOX_TMPFS_MB` | `64` | The one writable, non-executable scratch directory. |
+| `SANDBOX_TIMEOUT_SECONDS` | `60` | After this the container is killed and removed. |
+| `REQUIRE_SANDBOX` | `false` | Refuse a run that cannot get a verified container, instead of simulating it. |
+
+The sandbox limits are checked when settings load: an out-of-range value stops
+the process rather than failing every run it later picks up.
 
 Passwords are masked (`safe_database_url`) before the URL is ever logged.
 
@@ -108,6 +123,8 @@ stays snake_case (`CamelModel` generates the aliases).
 | `GET` | `/executions/{id}/stream` | viewer | Server-sent events while the run is live. |
 | `GET` | `/organization/runtime` | viewer | Kill-switch state and how many approvals are waiting. |
 | `PATCH` | `/organization/runtime` | admin to engage, owner to release | The organization-wide stop. |
+| `GET` | `/organization/sandbox` | viewer | Sandbox configuration and whether a runtime answers. Starts nothing. |
+| `POST` | `/organization/sandbox/check` | admin | Starts one throwaway container and returns every isolation check. |
 
 **Collections** answer with `{items, total, limit, offset}`; `limit` defaults to 50
 and is capped at 200.
@@ -230,14 +247,16 @@ version - upgrading is a deliberate act, because a new manifest may ask for more
 
 ## 6. The runtime
 
-**It orchestrates; it does not execute.** There is no sandbox (Phase 6) and no
-model gateway (Phase 7), so no agent code runs, no model is called and no tool
-is invoked. Every run records `runtime = "simulation"`, every simulated step
-says so in its own text, and tool calls are recorded as `simulated` — never as
-`succeeded`. Nothing in the database can be mistaken for work that happened.
+**It orchestrates; it does not execute.** Each run is given a verified
+container (§7), but there is no model gateway (Phase 7), so nothing runs inside
+it: no agent code, no model call, no tool. `runtime` records which of two things
+happened — `sandbox` when a verified container was created for the run,
+`simulation` when none was available — and tool calls are recorded as
+`simulated`, never as `succeeded`. Nothing in the database can be mistaken for
+work that happened.
 
 What *is* real is everything around the work: the state machine, the budget,
-the approval pauses, cancellation, the kill switch, and the record.
+the approval pauses, cancellation, the kill switch, the sandbox, and the record.
 
 **The plan** (`app/runtime/plan.py`) comes from the agent's own declaration:
 prepare, think, one step per declared tool, finish. It is not a model deciding
@@ -289,7 +308,74 @@ of status changes and new timeline entries. It is an optimisation: the UI also
 polls while a run is live, so a browser without `EventSource`, or a proxy that
 buffers the stream, still sees progress.
 
-## 7. Domain rules
+## 7. The sandbox
+
+**What it is for.** Agent code must never run on the host. Before a run takes
+its first step, the engine starts a container for it, asks the container what
+it can do, and decides from the answers whether the run may continue. Nothing
+executes inside it yet; this phase builds the box and proves it holds.
+
+**The image** (`agents/sandbox/`) is Alpine Python with a fixed unprivileged
+account, uid/gid 65532, and one read-only program: `probe.py`. The probe reports
+its identity, whether `/` and `/tmp` are writable, its effective capabilities,
+`NoNewPrivs`, whether anything on the network answers or DNS resolves, its
+cgroup memory and process limits, whether the container socket or a host path is
+visible, and the names (never the values) of its environment variables.
+
+```
+docker build -t agenthub/sandbox:0.6.0 agents/sandbox
+```
+
+**The container spec** (`app/sandbox/spec.py`) is a pure function from limits to
+arguments, so every rule is a unit test:
+
+| Rule | Argument |
+| --- | --- |
+| Ephemeral | `--rm` |
+| Unprivileged | `--user 65532:65532`, `--cap-drop ALL`, `--security-opt no-new-privileges` |
+| Nothing persists or executes from disk | `--read-only`, `--tmpfs /tmp:rw,noexec,nosuid,nodev,size=…` |
+| No network | `--network none` |
+| Bounded | `--memory` equal to `--memory-swap` (no swap), `--cpus`, `--pids-limit` |
+| Traceable | `--name agenthub-<execution>`, labels for execution, organization and role |
+| Nothing from the host | no `-v`, `--mount`, `--device`, `--env` or `--env-file`, and no socket |
+
+`validate()` is the last gate before a container starts: it refuses
+`--privileged`, host PID/IPC/user/network namespaces, `--cap-add`, volumes,
+mounts, devices and anything naming `docker.sock`, even though the builder
+cannot produce them. A future edit that adds one should fail loudly.
+
+**The runner** (`app/sandbox/runner.py`) drives the runtime's CLI as a
+subprocess — never a shell, never a socket handle — with stdin closed. A
+container that outlives its timeout is killed and force-removed by name. Output
+is capped at 64 KiB. A missing or unresponsive runtime is reported as
+unavailable, not as an error.
+
+**Verification** (`app/sandbox/report.py`) turns the probe's answer into 13
+checks: non-root, read-only root, writable scratch, no capabilities, no
+escalation, no network, no DNS, no container socket, no host mounts, no
+credential-shaped variables, only the image's own variables, memory capped, and
+processes capped. **A check the container did not answer counts as failed**:
+silence is not a clean bill of health.
+
+**What the engine does with it**
+
+| Outcome | Run continues? | Recorded as |
+| --- | --- | --- |
+| Container starts, every check passes | yes | `runtime = sandbox`, "Sandbox verified" |
+| Container starts but a check fails, or it times out | **no**, `FAILED` | error `sandbox_unsafe`, naming the failed checks |
+| No runtime, `REQUIRE_SANDBOX=false` | yes | `runtime = simulation`, "No sandbox available" |
+| No runtime, `REQUIRE_SANDBOX=true` | **no**, `FAILED` | error `sandbox_unavailable` |
+
+The full report is stored on the execution (`sandbox_report`) and returned by
+`GET /executions/{id}`, so the claim "this run was isolated" can be checked. A
+box that starts but does not hold fails the run, because it looks like
+protection without providing it.
+
+**Not yet:** anything running inside the container, an egress gateway (the
+network is simply absent), a custom seccomp profile (Docker's default applies),
+user-namespace remapping, and stronger isolation such as gVisor or microVMs.
+
+## 8. Domain rules
 
 The backend is authoritative; the frontend's Zod rules only improve the form.
 
@@ -304,12 +390,13 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   verification is not `rejected`.
 - Executions can only be requested for an `active` agent.
 
-## 8. Database
+## 9. Database
 
 - **Runtime tables:** `execution_events`, `execution_logs`,
   `execution_tool_calls` and `execution_approvals`, all cascading from the
   execution. `executions` also carries the budget it was given, the worker
-  claim, the heartbeat and any error.
+  claim, the heartbeat, any error, and `sandbox_report` — what its container
+  said about its own isolation, null for runs that never had one.
 - **Registry tables:** `agent_versions` (immutable manifests) and
   `installations` (one row per organization per installed agent, holding the
   grants). Both are organization-scoped like everything else.
@@ -358,7 +445,7 @@ cd backend
 Four fictional agents and three execution records, safe to run twice. The
 execution rows are records of requests, not evidence that anything ran.
 
-## 9. Testing
+## 10. Testing
 
 ```powershell
 cd backend
@@ -391,9 +478,38 @@ manifest asked for, that installing grants nothing by default, and that
 installations never cross organizations. PostgreSQL is covered in CI by applying,
 rolling back and reapplying the migrations against a real server.
 
-## 10. Security status
+The sandbox is tested in three layers, and only one of them needs a daemon:
 
-Implemented: an orchestrator that executes nothing, budgets enforced per run,
+- **What AgentHub asks for** (`test_sandbox_spec.py`, `test_sandbox_report.py`,
+  `test_sandbox_probe.py`): every container argument, the refusal of dangerous
+  ones, the verdict for each check including silent and malformed answers, and
+  the probe's judgement of which environment variables are leaks.
+- **What AgentHub does with the answer** (`test_sandbox_runner.py`,
+  `test_sandbox_engine.py`): the runner is driven against a stand-in `docker`
+  executable that records its arguments — exact arguments, empty stdin,
+  timeouts with forced removal, non-zero exits, unreadable and oversized
+  output. The engine is driven with stub sandboxes through every row of the
+  outcome table in §7, and misconfigured limits are refused at startup. An
+  autouse fixture guarantees no other test ever touches the host's container
+  runtime.
+- **What a kernel actually does** (`test_sandbox_container.py`, marked
+  `sandbox`): starts the real image and requires all 13 checks to pass, the
+  limits to be the ones asked for, and no container to be left behind. These
+  skip without a runtime and image; the `sandbox` CI job builds the image and
+  sets `AGENTHUB_REQUIRE_SANDBOX_TESTS=1`, which turns a skip into a failure.
+
+```powershell
+docker build -t agenthub/sandbox:0.6.0 agents/sandbox
+cd backend
+.\.venv\Scripts\python.exe -m pytest -m sandbox
+```
+
+## 11. Security status
+
+Implemented: an orchestrator that executes nothing, a per-run container that is
+ephemeral, non-root, capability-free, read-only, network-less and
+resource-limited, checked from the inside before every run and failing the run
+when it does not hold, budgets enforced per run,
 human approval before a declared capability is used, cancellation and an
 organization-wide kill switch, immutable published manifests, deny-by-default
 permission grants
@@ -410,8 +526,10 @@ throughout.
 **Not implemented yet:** MFA and SSO (password sign-in is the only method), email
 delivery and therefore password reset and email verification, an audit log, CORS
 configuration for a separate frontend origin, shared-store rate limiting for
-multiple workers, agent execution and sandboxing (Phase 6), a real model
-(Phase 7) and real security scanning (Phase 8). Grants and policies are checked
+multiple workers, agent execution of any kind, a real model (Phase 7), an
+egress gateway, a custom seccomp profile, and real security scanning (Phase 8).
+Real-container isolation is verified only in CI: it was not exercised on the
+machine this phase was built on, which has no container runtime. Grants and policies are checked
 when the runtime plans a step, but nothing enforces them against real code
 because no real code runs. Verification is a stored label, not the result of a
 review anyone performed. Nothing here has been penetration-tested or reviewed by

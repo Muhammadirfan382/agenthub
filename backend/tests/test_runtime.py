@@ -12,20 +12,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import Settings
 from app.db.models import Execution
 from app.runtime.plan import build_plan
 from app.runtime.worker import run_once
-from tests.conftest import Harness
+from tests.conftest import Harness, runtime_settings
 from tests.factories import agent_payload, grant
 
 
-def drain(harness: Harness, *, limit: int = 10) -> int:
+def drain(harness: Harness, *, limit: int = 10, settings: Settings | None = None) -> int:
     """Runs queued work until there is none left. Returns how many runs moved."""
 
     async def _drain(factory: async_sessionmaker[AsyncSession]) -> int:
         moved = 0
         for _ in range(limit):
-            if not await run_once(factory, worker="test-worker"):
+            if not await run_once(
+                factory, worker="test-worker", settings=settings or runtime_settings()
+            ):
                 break
             moved += 1
         return moved
@@ -125,7 +128,11 @@ class TestLifecycle:
         body = client.get(f"/api/v1/executions/{execution['id']}").json()
         assert body["status"] == "COMPLETED"
         assert body["durationMs"] is not None
-        assert [event["kind"] for event in body["timeline"]][:2] == ["lifecycle", "model"]
+        kinds = [event["kind"] for event in body["timeline"]]
+        # The run opens with its lifecycle events — started, and what it was
+        # given to run in — and a model step follows.
+        assert kinds[0] == "lifecycle"
+        assert "model" in kinds
         assert any("simulated" in event["label"].lower() for event in body["timeline"])
         assert body["logs"], "the run should have written logs"
         assert body["result"].startswith("Simulated run finished")
@@ -428,8 +435,16 @@ class TestWorkerClaiming:
         async def race() -> list[bool]:
             return list(
                 await asyncio.gather(
-                    run_once(harness.session_factory, worker="worker-a"),
-                    run_once(harness.session_factory, worker="worker-b"),
+                    run_once(
+                        harness.session_factory,
+                        worker="worker-a",
+                        settings=runtime_settings(),
+                    ),
+                    run_once(
+                        harness.session_factory,
+                        worker="worker-b",
+                        settings=runtime_settings(),
+                    ),
                 )
             )
 

@@ -101,8 +101,10 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 - Agent runtime (Phase 5): a database-backed queue and worker that walks each
   run step by step, enforces the budget it was given, pauses for human approval,
   honours cancellation and an organization-wide kill switch, and records a
-  timeline, logs and tool calls. It **executes nothing**: no sandbox exists, so
-  every run is marked `simulation`.
+  timeline, logs and tool calls. It **executes nothing** yet: see §5 and §6.
+- Sandbox (Phase 6): before a run's first step the engine starts an isolated
+  container, checks it from the inside, and fails the run if any isolation
+  check fails. Nothing executes inside it until the model gateway exists.
 - Agent registry (Phase 4): immutable published manifests, marketplace
   listings governed by a visibility setting, and installations that record what
   an organization granted - never more than the manifest requested, and nothing
@@ -168,8 +170,17 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 ### Current implementation
 
-None. `agents/runtime/`, `agents/tools/` and `agents/policies/` are empty
-placeholders. **No agent is executed anywhere in the system.**
+The orchestration is real; the work is not. `backend/app/runtime/` holds a
+database-backed queue (claim, heartbeat, reclaim), a step engine that walks the
+plan derived from an agent's declaration, per-run budgets, approval pauses,
+cancellation at step boundaries, and the organization kill switch.
+
+Each run is marked with the runtime that produced it: `sandbox` when a verified
+container was created for it (§6), `simulation` when none was available. In
+both cases **no agent code, model call or tool invocation happens**: the model
+gateway is Phase 7, so tool calls are recorded as `simulated`, never
+`succeeded`. `agents/runtime/`, `agents/tools/` and `agents/policies/` remain
+empty placeholders.
 
 ### Planned architecture
 
@@ -193,7 +204,29 @@ placeholders. **No agent is executed anywhere in the system.**
 
 ### Current implementation
 
-None. `agents/sandbox/` is an empty placeholder.
+- **Image** (`agents/sandbox/`): Alpine Python with a fixed unprivileged
+  account (uid/gid 65532) and one program, `probe.py`, which reports what the
+  container can do. It contains no agent code.
+- **Container spec** (`backend/app/sandbox/spec.py`): the arguments every
+  container is started with, as a pure function - `--rm`, `--user 65532:65532`,
+  `--cap-drop ALL`, `no-new-privileges`, `--read-only` with a `noexec` tmpfs,
+  `--network none`, memory (no swap), CPU and process limits, and labels
+  tracing it to its run. No mounts, no socket, no `--env`. A final gate refuses
+  `--privileged`, host namespaces, `--cap-add`, volumes, devices and the socket.
+- **Runner** (`backend/app/sandbox/runner.py`): drives the runtime's CLI with
+  no stdin, a timeout (after which the container is force-removed) and capped
+  output.
+- **Verification** (`backend/app/sandbox/report.py`): the probe's answers are
+  judged outside the container into 13 checks. Anything unreported counts as a
+  failure. The engine records the report on the run; a container that fails a
+  check fails the run (`sandbox_unsafe`); with no runtime the run is a
+  simulation, or is refused when `REQUIRE_SANDBOX=true`.
+- **Where it is proven:** the arguments, runner and engine behaviour are tested
+  without a daemon; the `sandbox` CI job starts real containers and requires
+  every check to pass.
+- **Not yet:** a custom seccomp profile (Docker's default applies), user
+  namespace remapping, gVisor or microVMs, an egress gateway, and anything
+  running inside the box.
 
 ### Planned architecture
 
@@ -225,8 +258,10 @@ None. `agents/sandbox/` is an empty placeholder.
   consumes, no secrets in browser code.
 - CI runs with read-only repository permissions and does not persist checkout
   credentials.
-- **Not implemented:** authentication, authorization, CSRF protection, rate limiting,
-  security headers or CSP, secret management, dependency or secret scanning in CI.
+- Authentication, role-based authorization, CSRF protection and sign-in
+  throttling (Phase 3); execution isolation checks (Phase 6, §6).
+- **Not implemented:** CSP, secret management, general API rate limiting, an
+  audit log, and dependency or secret scanning in CI.
 
 ### Planned architecture
 

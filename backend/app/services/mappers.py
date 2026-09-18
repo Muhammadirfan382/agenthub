@@ -171,6 +171,7 @@ def to_execution_detail(
         to_approval_read(approval, execution.agent_name).model_dump(by_alias=True)
         for approval in approvals
     ]
+    payload["sandboxReport"] = execution.sandbox_report
     payload["error"] = (
         {"code": execution.error_code, "message": execution.error_message}
         if execution.error_code

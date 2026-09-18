@@ -73,17 +73,55 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
 
+      # The sandbox probe ships in the image, not the backend package, but it
+      # is first-party Python and held to the same rules.
       - name: Lint
-        run: python -m ruff check .
+        run: python -m ruff check . ../agents/sandbox
 
       - name: Format check
-        run: python -m ruff format --check .
+        run: python -m ruff format --check . ../agents/sandbox
 
       - name: Type check
         run: python -m mypy
 
       - name: Test
         run: python -m pytest
+
+  sandbox:
+    name: Sandbox isolation (Docker)
+    # The only place the isolation guarantees are checked against a real
+    # kernel. Everything else asserts what AgentHub asks for; this asserts
+    # what a container can actually do.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Turns "no runtime" or "image missing" into a failure rather than a
+      # quiet skip, so this job cannot pass without verifying anything.
+      AGENTHUB_REQUIRE_SANDBOX_TESTS: '1'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Build the sandbox image
+        run: docker build --tag agenthub/sandbox:0.6.0 ../agents/sandbox
+
+      - name: Start real containers and check every isolation guarantee
+        run: python -m pytest -m sandbox -rs
 
   migrations:
     name: Migrations (PostgreSQL)

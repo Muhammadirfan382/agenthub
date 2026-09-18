@@ -126,6 +126,23 @@ export function useRuntimeState() {
   return useQuery({ queryKey: queryKeys.runtime.state, queryFn: () => runtime.state() });
 }
 
+/** Reads the sandbox configuration. Asking starts no container. */
+export function useSandboxStatus() {
+  const { runtime } = useServices();
+  return useQuery({ queryKey: queryKeys.runtime.sandbox, queryFn: () => runtime.sandbox() });
+}
+
+/** Starts one throwaway container and reports what it could do. */
+export function useCheckSandbox() {
+  const { runtime } = useServices();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => runtime.checkSandbox(),
+    // A check that reached a runtime is fresher news than the cached status.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runtime.sandbox }),
+  });
+}
+
 export function useSetExecutionsPaused() {
   const { runtime } = useServices();
   const queryClient = useQueryClient();

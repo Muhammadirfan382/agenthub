@@ -28,6 +28,7 @@ function ExecutionTraceBadge() {
 import { ApprovalPanel } from './components/ApprovalPanel';
 import { ExecutionTimeline } from './components/ExecutionTimeline';
 import { LogList } from './components/LogList';
+import { SandboxChecks } from './components/SandboxChecks';
 import { ToolCallsTable } from './components/ToolCallsTable';
 
 export default function ExecutionDetailPage() {
@@ -71,6 +72,12 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
     ],
     ['Status', <ExecutionStatusBadge key="status" status={execution.status} />],
     ['Trigger', <span key="trigger" className="capitalize">{execution.trigger}</span>],
+    [
+      'Runtime',
+      <Badge key="runtime" tone={execution.runtime === 'sandbox' ? 'success' : 'neutral'}>
+        {execution.runtime === 'sandbox' ? 'Sandbox' : 'Simulation'}
+      </Badge>,
+    ],
     ['Model', <span key="model" className="font-mono text-xs">{execution.model}</span>],
     ['Started', formatDateTime(execution.startedAt)],
     ['Ended', execution.endedAt ? formatDateTime(execution.endedAt) : 'Not finished'],
@@ -117,7 +124,11 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
         resource="executions"
         className="mb-6"
         demo="Timeline, logs and tool calls are generated demonstration data. They are not streamed from a running agent."
-        live="The runtime orchestrated this run and recorded every step, but executed nothing: there is no sandbox yet, so no agent code, model or tool was actually run."
+        live={
+          execution.runtime === 'sandbox'
+            ? 'A verified, isolated container was created for this run, but nothing executed inside it: there is no model gateway yet, so no agent code, model or tool was actually run.'
+            : 'The runtime orchestrated this run and recorded every step, but executed nothing: no sandbox was available, so no agent code, model or tool was actually run.'
+        }
       />
 
       {execution.error && (
@@ -154,6 +165,22 @@ function Detail({ execution }: { execution: ExecutionDetail }) {
               ) : (
                 <p className="text-fg-muted">
                   {execution.status === 'COMPLETED' ? 'No result was recorded.' : 'No result: the execution has not completed successfully.'}
+                </p>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Sandbox"
+              description="What the container created for this run reported about its own isolation."
+            />
+            <div className="px-5 py-4">
+              {execution.sandboxReport ? (
+                <SandboxChecks report={execution.sandboxReport} />
+              ) : (
+                <p className="text-sm text-fg-muted">
+                  No container was checked for this run, so nothing about its isolation is claimed.
                 </p>
               )}
             </div>

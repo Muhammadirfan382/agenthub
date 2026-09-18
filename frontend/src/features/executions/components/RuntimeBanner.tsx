@@ -22,7 +22,7 @@ export function RuntimeBanner({ className }: { className?: string }) {
           {runtime.data?.pausedBy ? `Engaged by ${runtime.data.pausedBy}` : 'Engaged'}
           {runtime.data?.pausedAt ? ` on ${formatDateTime(runtime.data.pausedAt)}` : ''}
           {runtime.data?.reason ? `: ${runtime.data.reason}` : '.'} Nothing new starts until the
-          owner releases the kill switch in Settings → Security.
+          owner releases the kill switch in Settings → Runtime.
         </Alert>
       )}
 

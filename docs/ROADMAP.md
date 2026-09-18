@@ -136,6 +136,28 @@ per-organization concurrency limits.
 - Network egress denied by default; allowed only through gateways.
 - Tests that verify isolation guarantees.
 
+**Delivered:** a sandbox image with a fixed non-root account and an in-container
+probe; a container spec that is ephemeral, read-only, capability-free,
+network-less and resource-limited, with no mounts, socket or environment passed
+in; a runner with timeouts, forced cleanup and capped output; 13 isolation
+checks judged outside the container; and an engine that starts and checks a
+container before every run, fails the run when the box does not hold, and
+records the report on it. Settings → Runtime shows the configuration and can run
+the check on demand. See [BACKEND.md](BACKEND.md) §7.
+
+**How it is verified:** the container arguments, the runner (against a stand-in
+runtime) and the engine's decisions are tested on any machine. Starting real
+containers needs a daemon, so those tests run in the `sandbox` CI job, which
+fails rather than skips when it cannot run them. They were **not** executed on
+the development machine this phase was built on, which has no container
+runtime.
+
+**Deliberately not in this phase:** running anything inside the sandbox (there
+is no agent program until the model gateway exists), an egress gateway (the
+network is simply off), a custom seccomp profile, and stronger isolation such as
+gVisor or microVMs. Without a runtime, runs still proceed as recorded
+simulations unless `REQUIRE_SANDBOX=true`.
+
 ## Phase 7: AI/LLM integration
 
 **Objective:** connect agents to language models through a controlled gateway.

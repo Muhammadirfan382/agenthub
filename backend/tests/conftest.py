@@ -10,6 +10,7 @@ tokens are exercised the same way a browser exercises them.
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,9 +31,22 @@ from app.db.base import Base
 from app.db.models import Membership, Organization, User
 from app.db.session import enable_sqlite_foreign_keys
 from app.main import create_app
+from app.runtime.sandbox import use_sandbox
+from app.sandbox import UnavailableSandbox
 from app.schemas.enums import ROLES, Role
 
 ClientFactory = Callable[[Environment], TestClient]
+
+
+def runtime_settings(**overrides: Any) -> Settings:
+    """Configuration for driving the engine directly in a test.
+
+    The engine falls back to `get_settings()`, which reads the environment and
+    — quite rightly — refuses to start a production deployment without a
+    database URL. Tests say what they mean instead of relying on that fallback.
+    """
+    return Settings(environment="development", **overrides)
+
 
 # Throwaway credentials for a database that lives for one test.
 TEST_PASSWORD = "correct-horse-battery-staple"
@@ -136,6 +150,22 @@ class Harness:
         assert response.status_code == 200, response.text
         client.headers[CSRF_HEADER] = client.cookies[CSRF_COOKIE]
         return client
+
+
+@pytest.fixture(autouse=True)
+def sandbox_is_never_the_host_s() -> Iterator[None]:
+    """No test starts a container on the machine running the suite.
+
+    Without this, a developer or CI runner that happens to have Docker
+    installed would quietly start real containers for every execution test,
+    and the suite would behave differently depending on the host. Tests that
+    care about sandbox behaviour substitute their own.
+    """
+    use_sandbox(UnavailableSandbox("Tests do not use the host's container runtime."))
+    try:
+        yield
+    finally:
+        use_sandbox(None)
 
 
 @pytest.fixture

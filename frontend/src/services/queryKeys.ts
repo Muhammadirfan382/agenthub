@@ -31,6 +31,7 @@ export const queryKeys = {
   runtime: {
     all: ['runtime'] as const,
     state: ['runtime', 'state'] as const,
+    sandbox: ['runtime', 'sandbox'] as const,
   },
   security: {
     overview: ['security', 'overview'] as const,

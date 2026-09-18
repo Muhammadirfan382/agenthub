@@ -26,6 +26,8 @@ import type {
   SecurityEvent,
   SecurityOverview,
   RuntimeState,
+  SandboxCheckResult,
+  SandboxStatus,
   SecurityPolicy,
   SessionInfo,
   Visibility,
@@ -148,6 +150,10 @@ export interface RuntimeService {
   state(): Promise<RuntimeState>;
   /** The organization-wide stop: blocks new runs and stops running ones. */
   setExecutionsPaused(paused: boolean, reason?: string): Promise<RuntimeState>;
+  /** The sandbox configuration and whether a container runtime answers. Starts nothing. */
+  sandbox(): Promise<SandboxStatus>;
+  /** Starts one throwaway container and reports each isolation guarantee. */
+  checkSandbox(): Promise<SandboxCheckResult>;
 }
 
 export interface SecurityService {

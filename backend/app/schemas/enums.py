@@ -40,9 +40,12 @@ ExecutionStatus = Literal[
     "CANCELLED",
     "TIMEOUT",
 ]
-# What produced a run. Nothing but `simulation` exists yet: there is no sandbox
-# (Phase 6) and no model gateway (Phase 7), so no agent code is executed.
-ExecutionRuntime = Literal["simulation"]
+# What produced a run.
+#   simulation - no container was involved; the run was recorded only.
+#   sandbox    - an isolated container was created and verified for this run.
+# Neither executes agent code: the model gateway that would give an agent
+# something to do arrives in Phase 7.
+ExecutionRuntime = Literal["simulation", "sandbox"]
 TimelineKind = Literal["lifecycle", "model", "tool", "policy", "error", "result"]
 LogLevel = Literal["debug", "info", "warn", "error"]
 #: A tool call is never "succeeded" while the runtime is a simulation.

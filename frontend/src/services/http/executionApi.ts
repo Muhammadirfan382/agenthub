@@ -7,6 +7,8 @@ import type {
   ExecutionDetail,
   ID,
   RuntimeState,
+  SandboxCheckResult,
+  SandboxStatus,
 } from '@/types/domain';
 import { apiRequest } from './client';
 import { orNull } from './orNull';
@@ -15,6 +17,8 @@ import {
   ExecutionDetailSchema,
   ExecutionSchema,
   RuntimeStateSchema,
+  SandboxCheckResultSchema,
+  SandboxStatusSchema,
   pageSchema,
 } from './schemas';
 
@@ -82,6 +86,16 @@ export const httpRuntimeService: RuntimeService = {
     return apiRequest('/api/v1/organization/runtime', RuntimeStateSchema, {
       method: 'PATCH',
       body: { executionsPaused: paused, reason: reason ?? null },
+    });
+  },
+
+  sandbox(): Promise<SandboxStatus> {
+    return apiRequest('/api/v1/organization/sandbox', SandboxStatusSchema);
+  },
+
+  checkSandbox(): Promise<SandboxCheckResult> {
+    return apiRequest('/api/v1/organization/sandbox/check', SandboxCheckResultSchema, {
+      method: 'POST',
     });
   },
 };

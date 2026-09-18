@@ -55,6 +55,9 @@ import type {
 } from '@/types/domain';
 import { EXECUTION_STATUSES } from '@/types/domain';
 
+const DEMO_SANDBOX_DETAIL =
+  'Demo mode has no backend, so no container runtime: nothing can be isolated or checked here.';
+
 export interface DemoServiceOptions {
   /** Simulated network latency so loading states are visible. Tests use 0. */
   latencyMs?: number;
@@ -479,6 +482,20 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     },
   };
 
+  const demoSandboxStatus = {
+    enabled: true,
+    available: false,
+    command: 'docker',
+    image: 'agenthub/sandbox:0.6.0',
+    memoryMb: 512,
+    cpus: 1,
+    pidsLimit: 128,
+    tmpfsMb: 64,
+    timeoutSeconds: 60,
+    required: false,
+    detail: DEMO_SANDBOX_DETAIL,
+  };
+
   const runtimeService: RuntimeService = {
     state() {
       return respond({
@@ -495,6 +512,28 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
         reason: paused ? (reason ?? null) : null,
       };
       return respond(runtimeState);
+    },
+    // Demo mode has no backend and therefore no container runtime. It says so
+    // rather than showing isolation checks that never ran.
+    sandbox() {
+      return respond(demoSandboxStatus);
+    },
+    checkSandbox() {
+      return respond({
+        ...demoSandboxStatus,
+        report: {
+          passed: false,
+          summary: '0 of 1 isolation checks passed',
+          checks: [
+            {
+              id: 'runtime_available',
+              label: 'A container runtime is available',
+              passed: false,
+              detail: DEMO_SANDBOX_DETAIL,
+            },
+          ],
+        },
+      });
     },
   };
 

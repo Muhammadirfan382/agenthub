@@ -1,18 +1,22 @@
 """Execution tables: the run itself and everything it records.
 
-Phase 5 orchestrates executions but deliberately runs no agent code: there is
-no sandbox yet (Phase 6) and no model gateway (Phase 7). Every row carries the
-runtime that produced it, which is `simulation` today, so a recorded step can
-never be mistaken for work that actually happened.
+A run carries the runtime that produced it — `sandbox` when a verified
+container was created for it, `simulation` when none was available — and, in
+`sandbox_report`, what that container reported about its own isolation.
+
+Neither runtime executes agent code: the model gateway that would give an agent
+something to do arrives in Phase 7, so a recorded step can never be mistaken
+for work that actually happened.
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.models.agent import JsonDocument
 
 if TYPE_CHECKING:
     from app.db.models.agent import Agent
@@ -33,7 +37,7 @@ class Execution(Base):
     agent_name: Mapped[str] = mapped_column(String(120), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     trigger: Mapped[str] = mapped_column(String(16), nullable=False)
-    #: What actually produced this run. `simulation` until the sandbox exists.
+    #: What produced this run: `sandbox` (verified container) or `simulation`.
     runtime: Mapped[str] = mapped_column(String(16), nullable=False, default="simulation")
 
     requested_by_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
@@ -76,6 +80,8 @@ class Execution(Base):
 
     error_code: Mapped[str | None] = mapped_column(String(48), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: What the sandbox reported about itself for this run, check by check.
+    sandbox_report: Mapped[dict[str, Any] | None] = mapped_column(JsonDocument, nullable=True)
 
     agent: Mapped["Agent"] = relationship(back_populates="executions")
 

@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "sandbox: needs a container runtime (docker or compatible); skipped when absent",
+]
 
 [tool.ruff]
 target-version = "py312"

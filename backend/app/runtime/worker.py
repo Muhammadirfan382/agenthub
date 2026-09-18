@@ -85,7 +85,12 @@ async def claim_next(session: AsyncSession, *, worker: str) -> Execution | None:
     return candidate
 
 
-async def run_once(session_factory: async_sessionmaker[AsyncSession], *, worker: str) -> bool:
+async def run_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    worker: str,
+    settings: Settings | None = None,
+) -> bool:
     """Claims and runs at most one execution. True when there was work."""
     async with session_factory() as session:
         execution = await claim_next(session, worker=worker)
@@ -93,12 +98,16 @@ async def run_once(session_factory: async_sessionmaker[AsyncSession], *, worker:
             await session.rollback()
             return False
 
+        # Held separately: a rollback expires the instance, and reading an
+        # attribute back off it would need the very session that just failed.
+        execution_id = execution.id
+
         try:
-            outcome = await run_to_completion(session, execution)
+            outcome = await run_to_completion(session, execution, settings=settings)
             await session.commit()
             logger.info(
                 "execution finished",
-                extra={"execution_id": execution.id, "status": outcome.status},
+                extra={"execution_id": execution_id, "status": outcome.status},
             )
         except Exception:
             await session.rollback()
@@ -107,11 +116,11 @@ async def run_once(session_factory: async_sessionmaker[AsyncSession], *, worker:
             async with session_factory() as recovery:
                 await recovery.execute(
                     update(Execution)
-                    .where(Execution.id == execution.id)
+                    .where(Execution.id == execution_id)
                     .values(claimed_by=None, heartbeat_at=None)
                 )
                 await recovery.commit()
-            logger.exception("execution step failed", extra={"execution_id": execution.id})
+            logger.exception("execution step failed", extra={"execution_id": execution_id})
         return True
 
 
@@ -121,11 +130,12 @@ async def work_loop(
     worker: str,
     stop: asyncio.Event,
     poll_seconds: float = POLL_SECONDS,
+    settings: Settings | None = None,
 ) -> None:
     logger.info("runtime worker started", extra={"worker": worker})
     while not stop.is_set():
         try:
-            did_work = await run_once(session_factory, worker=worker)
+            did_work = await run_once(session_factory, worker=worker, settings=settings)
         except Exception:
             logger.exception("worker loop error")
             did_work = False
@@ -142,7 +152,9 @@ async def main(settings: Settings | None = None) -> None:
     engine = create_engine(resolved)
     stop = asyncio.Event()
     try:
-        await work_loop(create_session_factory(engine), worker=worker_name(), stop=stop)
+        await work_loop(
+            create_session_factory(engine), worker=worker_name(), stop=stop, settings=resolved
+        )
     finally:
         await engine.dispose()
 

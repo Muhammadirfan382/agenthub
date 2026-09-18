@@ -71,6 +71,10 @@ variable is available unless it has been deliberately granted.
 - Agent execution **must** eventually run in an isolated sandbox: no host access,
   no ambient credentials, resource limits, egress only through an allow-listing
   gateway. Until that exists, agents are not executed at all.
+- The sandbox's guarantees live in `backend/app/sandbox/spec.py` and are
+  asserted by `backend/tests/test_sandbox_spec.py`. Never weaken either to make
+  something work: no mounts, no `--env`, no socket, no added capabilities, no
+  network. A container that fails an isolation check must fail its run.
 
 ## 4. Dependencies
 
@@ -87,7 +91,7 @@ variable is available unless it has been deliberately granted.
 ```
 frontend/        React + TypeScript + Vite (strict TS, ESLint, Vitest)
 backend/         Python FastAPI service (Pydantic settings, pytest, ruff, mypy)
-agents/          Future agent runtime, sandbox, tools and policies (empty in Phase 0)
+agents/          Agent runtime, sandbox, tools and policies (sandbox image since Phase 6)
 database/        Future migrations and schema (empty in Phase 0)
 infrastructure/  Future Docker, Compose and deployment config (empty in Phase 0)
 scripts/         Developer scripts (empty in Phase 0)
