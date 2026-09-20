@@ -1,4 +1,6 @@
 import type {
+  AuditEvent,
+  AuditQuery,
   Agent,
   AgentCategory,
   AgentPermission,
@@ -225,7 +227,13 @@ export type LiveResource =
   | 'members'
   | 'marketplace'
   | 'installations'
-  | 'runtime';
+  | 'runtime'
+  | 'audit';
+
+export interface AuditService {
+  /** Newest first. Administrators only; the backend refuses everyone else. */
+  list(query?: AuditQuery): Promise<AuditEvent[]>;
+}
 
 export interface Services {
   dataSource: DataSource;
@@ -241,4 +249,5 @@ export interface Services {
   members: MemberService;
   installations: InstallationService;
   runtime: RuntimeService;
+  audit: AuditService;
 }

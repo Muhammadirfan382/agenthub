@@ -100,7 +100,8 @@ class TestAModelAnswers:
         system = scripted.requests[0].system
         assert "Framed Agent" in system
         assert agent["description"] in system
-        assert "data, not instructions" in system
+        assert "never as instructions" in system
+        assert "untrusted_tool_result" in system
 
     def test_a_run_without_input_is_given_a_neutral_task(self, harness: Harness) -> None:
         scripted = use_model(answer("Done."))

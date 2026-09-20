@@ -89,13 +89,19 @@ def _field_path(loc: Any) -> str:
     return ".".join(parts) or "request"
 
 
+def api_error_response(exc: "ApiError") -> JSONResponse:
+    """The response an ApiError becomes - for handlers, and for the rare endpoint
+    that must return one itself (e.g. to attach work that runs after sending)."""
+    response = _json(exc.status_code, ErrorResponse(code=exc.code, message=exc.message))
+    if isinstance(exc, RateLimitedError):
+        response.headers["Retry-After"] = str(exc.retry_after_seconds)
+    return response
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
-        response = _json(exc.status_code, ErrorResponse(code=exc.code, message=exc.message))
-        if isinstance(exc, RateLimitedError):
-            response.headers["Retry-After"] = str(exc.retry_after_seconds)
-        return response
+        return api_error_response(exc)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:

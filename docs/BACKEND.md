@@ -2,13 +2,14 @@
 
 FastAPI service for agents and executions, backed by SQLAlchemy and Alembic.
 
-**Status (Phase 7).** Persists organizations, users, memberships, sessions,
+**Status (Phase 8).** Persists organizations, users, memberships, sessions,
 agents, published versions, marketplace listings, installations, executions and
 everything a run records. Every endpoint except the health check and sign-in
 requires a session, and every action is checked against a role. A runtime
 orchestrates executions and gives each one an isolated, verified container
 (§7). With a provider configured, a real model answers each run through the
-model gateway (§8); the tools it asks for are checked and never executed. Treat it as pre-release software — it has never been deployed, audited or
+model gateway (§8); every tool call is decided by the policy engine (§9), and
+only `api_request` can run - a read-only GET through the egress gateway. Treat it as pre-release software — it has never been deployed, audited or
 run against real data.
 
 ---
@@ -29,6 +30,7 @@ backend/
 │   ├── runtime/            Plan, engine and worker (orchestration only)
 │   ├── sandbox/            Container spec, runner and isolation report
 │   ├── llm/                Model gateway, routing, pricing, provider adapters
+│   ├── security/           Policy engine, egress gateway, untrusted content, audit
 │   ├── services/           Business rules, authorization matrix, risk scoring
 │   └── main.py             create_app() application factory
 ├── scripts/create_user.py  Creates an account; there is no public sign-up
@@ -82,6 +84,11 @@ default.
 | `MODEL_DAILY_TOKEN_LIMIT_PER_ORG` | `2000000` | Per organization per UTC day, from the ledger. |
 
 A blank key is the same as no key. Routes are validated when settings load.
+
+| `EGRESS_ENABLED` | `true` | Let `api_request` run. Off means every tool is recorded as not executed. |
+| `EGRESS_MAX_TOOL_OUTPUT_CHARS` | `20000` | How much fetched text a model is given per call. |
+| `WRITE_REQUESTS_PER_MINUTE` | `120` | State-changing requests per client per minute. |
+| `SECRETS_DIR` | unset | Directory of files named after settings, e.g. a Docker or Kubernetes secret mount. |
 
 **No ambient credentials.** Only the `AGENTHUB_`-prefixed key variables are read:
 a plain `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` set machine-wide for other tools
@@ -148,6 +155,7 @@ stays snake_case (`CamelModel` generates the aliases).
 | `GET` | `/organization/sandbox` | viewer | Sandbox configuration and whether a runtime answers. Starts nothing. |
 | `POST` | `/organization/sandbox/check` | admin | Starts one throwaway container and returns every isolation check. |
 | `GET` | `/organization/models` | viewer | Providers (configured or not, never the key), routes, limits and today's usage. |
+| `GET` | `/audit` | admin | The organization's audit log, newest first. Filter by `action` prefix and `outcome`. Read-only. |
 
 **Collections** answer with `{items, total, limit, offset}`; `limit` defaults to 50
 and is capped at 200.
@@ -456,7 +464,9 @@ Phase 8's egress protection exists - and the model is told so in plain words.
 | --- | --- | --- |
 | a tool it was not given | `denied` | Refused |
 | arguments outside the schema | `failed` | Invalid arguments, and which |
-| an approved tool, or one needing no approval | `unavailable` | Not executed; no result |
+| `api_request`, approved and within policy | `succeeded` | The response, wrapped as untrusted content |
+| any other approved tool | `unavailable` | Not executed; no result |
+| anything the policy engine refuses (§9) | `denied` | Refused, naming the rule |
 | a tool a person refused | `denied` | Refused by that person |
 
 **The loop** (`app/runtime/agent_loop.py`). Each engine step is one model turn or
@@ -482,11 +492,103 @@ cd backend
 .\.venv\Scripts\python.exe -m scripts.model_smoke_test --yes
 ```
 
-**Not yet:** executing any tool, streaming answers to the browser token by token,
+**Not yet:** executing any tool other than `api_request`, streaming answers to
+the browser token by token,
 per-agent instruction prompts beyond the description, shared-store rate limits
 for several processes, and prices for OpenAI models.
 
-## 9. Domain rules
+## 9. The security layer
+
+Phase 8 turned what agents *declare* into what the platform *enforces*, and
+added the record of every such decision. Written against a blunt assumption:
+**the model is hostile.** Nothing below depends on a model behaving.
+
+### The policy engine (`app/security/policy.py`)
+
+Pure, ordered rules over facts the model cannot influence - the agent's grants
+and its declared security policy. The first rule that decides wins, and every
+decision names its rule so it can be audited and shown:
+
+| Rule | Refuses when |
+| --- | --- |
+| `grant` | the tool's capability is not granted |
+| `network_mode` | a network tool is used while the policy says `networkEgress: none` |
+| `read_only` | the request is not a GET |
+| `egress.*` | the URL fails a static egress check (scheme, credentials, port, IP literal, domain) |
+| `approval` | the grant requires approval **or** the capability's risk is one the agent's `approvalRequiredFor` lists - then a person decides |
+
+Until this phase `allowedDomains`, `networkEgress` and `approvalRequiredFor`
+were stored and shown but never enforced. They are enforced now.
+
+### The egress gateway (`app/security/egress.py`)
+
+The only way an agent's request leaves the server, and the reason `api_request`
+may run at all. Every request must pass all of:
+
+- `https` only, no credentials in the URL, default port only;
+- the host is a DNS name - never an IP literal - and **exactly** one of the
+  agent's allowed domains (no subdomains, no suffix tricks);
+- every address it resolves to is a public unicast address; loopback, private,
+  link-local, carrier-grade NAT, multicast, reserved and documentation ranges
+  are refused, including their IPv4-mapped, 6to4 and Teredo IPv6 forms. One bad
+  record among good ones is enough to refuse;
+- the connection is **pinned** to a checked address while TLS still verifies
+  the certificate for the real host name, so the name cannot be re-resolved to
+  an internal address between the check and the request (DNS rebinding);
+- redirects are never followed; no cookies or credentials are sent; binary
+  content is not read; size and time are bounded (256 KiB, 15s).
+
+A refusal names its rule (`private_address`, `redirect`, `not_allowed`, ...),
+which is recorded and returned to the model as an error.
+
+### Untrusted content (`app/security/untrusted.py`)
+
+Fetched text is wrapped in a labelled tag naming the tool, source and status;
+anything inside that looks like one of our tags is neutralised, control
+characters are removed and the size is capped. The model is told, in the system
+prompt and beside the content, that it is data and never instructions. **This is
+labelling, not protection** - the protection is that policy and egress decide
+actions, not the model.
+
+### The audit log (`app/security/audit.py`, `GET /audit`)
+
+Append-only, admin-read-only, organization-scoped. Sign-ins and failures, sign-
+outs, password changes, member and role changes, the kill switch, approvals,
+agent and installation changes, sandbox checks, policy refusals and every
+outbound request - allowed or blocked. Details are small, bounded and
+key-filtered: a password, token, key or cookie is dropped even if a caller
+passes one, and prompts, answers and fetched content are never recorded. No
+endpoint updates or deletes an event (a test walks the schema to be sure).
+
+A failed sign-in for an account that exists is recorded **after** the response
+is sent: doing the work inside the request would make those responses slower
+and so reveal which addresses have accounts.
+
+### Headers, limits and secrets
+
+- **Security headers** on every API response (`app/core/middleware.py`):
+  `Content-Security-Policy: default-src 'none'` (the API returns JSON, so
+  nothing in a response may load, run, frame or submit anything),
+  `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `nosniff`,
+  `DENY`, `no-referrer`, a restrictive `Permissions-Policy`, `no-store`, and
+  HSTS in production only. The development-only docs page is exempt from CSP.
+- **Write rate limiting:** state-changing requests are bounded per client
+  (`WRITE_REQUESTS_PER_MINUTE`), keyed by a fingerprint of the session cookie,
+  or by address when there is none. Per process, like sign-in throttling.
+- **Secrets from files:** `SECRETS_DIR` reads settings from a directory of
+  files named after them - how Docker and Kubernetes mount secrets. Environment
+  variables still win; a configured directory that does not exist stops the
+  process.
+
+### What is still open
+
+Prompt injection is **contained, not prevented**: a hijacked agent cannot act
+beyond its grants, but can still be misled about what it read. Live injection
+evaluations against real models have not been run. Allowed domains are trusted
+completely. Rate limits are per process. See [THREAT_MODEL.md](THREAT_MODEL.md)
+§5 and [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+
+## 10. Domain rules
 
 The backend is authoritative; the frontend's Zod rules only improve the form.
 
@@ -501,7 +603,7 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   verification is not `rejected`.
 - Executions can only be requested for an `active` agent.
 
-## 10. Database
+## 11. Database
 
 - **Runtime tables:** `execution_events`, `execution_logs`,
   `execution_tool_calls` and `execution_approvals`, all cascading from the
@@ -510,6 +612,8 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   said about its own isolation, null for runs that never had one; `mode`,
   `model_route`, `input_text`, `cost_microusd` and `conversation` for
   model-driven runs.
+- **Audit log:** `audit_events`, append-only, one row per security-relevant
+  decision, with a key-filtered detail document (§9).
 - **Usage ledger:** `model_usage`, one row per model request with tier,
   provider, requested and served model, outcome, tokens, estimated cost in
   micro-dollars and the provider's request id. Counts only - never a prompt or
@@ -562,7 +666,7 @@ cd backend
 Four fictional agents and three execution records, safe to run twice. The
 execution rows are records of requests, not evidence that anything ran.
 
-## 11. Testing
+## 12. Testing
 
 ```powershell
 cd backend
@@ -607,6 +711,20 @@ resume without re-asking the model, refusal, truncation, the turn, token, rate
 and daily limits, provider failures in the ledger, the status endpoint never
 returning a key, and organization isolation of usage.
 
+The security layer is tested without a network: the egress gateway against a
+replaced resolver and a recording transport (`test_egress.py`), the policy
+engine and untrusted-content wrapper as pure functions (`test_policy.py`), and
+the audit log, headers, write limit and secrets directory through the API
+(`test_security_layer.py`).
+
+`test_containment.py` holds **adversarial evaluations**: a scripted model that
+behaves as though fully prompt-injected - exfiltrating to an attacker's host,
+reaching cloud metadata, writing instead of reading, calling tools it was never
+given, smuggling instructions back inside fetched content - against the real
+engine, gateways and policy. Each asserts the platform held and that nothing
+left the server. They evaluate containment, not a real model's resistance to
+injection; that needs live evaluations, which have not been run.
+
 The sandbox is tested in three layers, and only one of them needs a daemon:
 
 - **What AgentHub asks for** (`test_sandbox_spec.py`, `test_sandbox_report.py`,
@@ -633,9 +751,16 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest -m sandbox
 ```
 
-## 12. Security status
+## 13. Security status
 
-Implemented: a model gateway that keeps provider credentials server-side, never
+Implemented: a policy engine that enforces every agent's declared security
+policy before any action, an egress gateway that is the only way a request
+leaves the server (allow-listed hosts, public addresses only, pinned
+connections, no redirects, bounded), an append-only audit log of security
+decisions, a strict CSP and security headers on every response, per-client
+write rate limiting, secrets from file mounts, and dependency and secret
+scanning with SHA-pinned actions in CI; a model gateway that keeps provider
+credentials server-side, never
 logs prompts, answers or keys, and meters every request against per-organization
 rate and daily token limits; a tool gateway that checks every model tool call
 against the agent's grants, a strict schema and human approval, and executes
@@ -659,9 +784,10 @@ throughout.
 **Not implemented yet:** MFA and SSO (password sign-in is the only method), email
 delivery and therefore password reset and email verification, an audit log, CORS
 configuration for a separate frontend origin, shared-store rate limiting for
-multiple workers, executing any tool, an egress gateway, prompt-injection
-defences beyond treating all model and tool text as data, a custom seccomp
-profile, and real security scanning (Phase 8). Real model calls are tested
+multiple workers, executing any tool other than `api_request`, prompt-injection
+defences beyond containment (a hijacked agent is bounded, not prevented from
+being misled), live adversarial evaluations against real models, a custom
+seccomp profile, and vault-based secret management. Real model calls are tested
 against scripted stand-ins only: no provider was called while this phase was
 built, because no credentials were available.
 Real-container isolation is verified only in CI: it was not exercised on the

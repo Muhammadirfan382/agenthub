@@ -10,10 +10,9 @@ gateway checks, in order:
 3. the agent's grant for the tool's capability, and whether a person must
    approve the call first.
 
-What happens after that is honest about this release: **no tool is executed.**
-Every tool that would need the network, the file system or a database needs the
-SSRF and egress protection planned for Phase 8, so an approved call is recorded
-as ``unavailable`` and the model is told plainly that nothing was done.
+Then the policy engine (``app/security/policy.py``) decides. After that, only
+``api_request`` can actually run - a read-only GET through the egress gateway -
+and every other allowed tool is recorded as not executed.
 """
 
 import json

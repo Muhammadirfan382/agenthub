@@ -138,12 +138,12 @@ describe('starting a run', () => {
     );
   });
 
-  it('does not promise that tools will run', async () => {
+  it('says only read-only requests to allowed domains can run', async () => {
     const { user } = renderApp('/agents/agt_research_scout', servicesAs('admin'));
 
     await user.click(await screen.findByRole('button', { name: 'Execute' }));
 
-    expect(screen.getByText(/checked against this agent's permissions but never executed/)).toBeInTheDocument();
+    expect(screen.getByText(/only read-only requests to its allowed domains can run/)).toBeInTheDocument();
   });
 });
 

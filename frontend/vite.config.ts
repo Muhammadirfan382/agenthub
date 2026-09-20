@@ -1,14 +1,33 @@
 import { fileURLToPath, URL } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
+import { contentSecurityPolicy } from './src/config/contentSecurityPolicy.ts';
 
 // Development services bind to the loopback interface only. The backend is
 // reached through the dev proxy, so the API needs no CORS configuration.
 const BACKEND_DEV_URL = 'http://127.0.0.1:8000';
 
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+/** Adds the Content-Security-Policy to the built index.html. Build only: see the policy's notes. */
+function cspMetaTag(apiBaseUrl: string | undefined): Plugin {
+  return {
+    name: 'agenthub-content-security-policy',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler: (html) =>
+        html.replace(
+          '<meta charset="UTF-8" />',
+          `<meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy(apiBaseUrl)}" />`,
+        ),
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), tailwindcss(), cspMetaTag(loadEnv(mode, process.cwd(), 'VITE_').VITE_API_BASE_URL)],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
@@ -52,4 +71,4 @@ export default defineConfig({
     // flake on timing rather than on behaviour.
     maxWorkers: 4,
   },
-});
+}));

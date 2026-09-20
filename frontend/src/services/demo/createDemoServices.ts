@@ -727,5 +727,8 @@ export function createDemoServices({ latencyMs = 350 }: DemoServiceOptions = {})
     members: memberService,
     installations: installationService,
     runtime: runtimeService,
+    // Demo mode has no backend, so nothing was ever recorded. It returns an
+    // empty log rather than inventing entries.
+    audit: { list: () => respond([]) },
   };
 }

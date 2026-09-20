@@ -5,6 +5,7 @@ repository root. Unknown variables are ignored, so settings for later phases
 are never loaded until code that needs them declares them explicitly.
 """
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -127,10 +128,21 @@ class Settings(BaseSettings):
             return None
         return value
 
+    # --- Egress (Phase 8) ----------------------------------------------------
+    #: Let `api_request` actually run: HTTPS GET to the agent's allowed domains
+    #: only, through app/security/egress.py. Off means every tool is recorded as
+    #: not executed, as before.
+    egress_enabled: bool = True
+    #: How much fetched text a model is given per tool call.
+    egress_max_tool_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
+
     # --- Runtime ------------------------------------------------------------
     # Run the execution worker inside the API process. Turn it off to run
     # `python -m app.runtime.worker` separately instead.
     runtime_worker_enabled: bool = True
+
+    #: State-changing requests per client per minute (see app/core/middleware.py).
+    write_requests_per_minute: int = Field(default=120, ge=10)
 
     # --- Login rate limiting (per process; see app/core/rate_limit.py) -------
     login_max_attempts: int = 5
@@ -190,4 +202,17 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    """Settings from the environment, a .env file and, optionally, secret files.
+
+    ``SECRETS_DIR`` points at a directory of files named after settings - the way
+    Docker and Kubernetes mount secrets - e.g. ``AGENTHUB_ANTHROPIC_API_KEY`` or
+    ``database_url``, each holding only the value. Environment variables take
+    precedence over files. A configured directory that does not exist stops the
+    process rather than silently running without its secrets.
+    """
+    secrets_dir = os.environ.get("SECRETS_DIR", "").strip()
+    if not secrets_dir:
+        return Settings()
+    if not Path(secrets_dir).is_dir():
+        raise RuntimeError(f"SECRETS_DIR is set to {secrets_dir!r}, which is not a directory.")
+    return Settings(_secrets_dir=secrets_dir)

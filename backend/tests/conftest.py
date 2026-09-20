@@ -35,6 +35,7 @@ from app.main import create_app
 from app.runtime.sandbox import use_sandbox
 from app.sandbox import UnavailableSandbox
 from app.schemas.enums import ROLES, Role
+from app.security.egress import EgressBlocked, EgressGateway, use_egress
 
 ClientFactory = Callable[[Environment], TestClient]
 
@@ -83,7 +84,7 @@ class Workspace:
         return self.accounts[role]
 
 
-def build_settings(environment: Environment = "test") -> Settings:
+def build_settings(environment: Environment = "test", **overrides: Any) -> Settings:
     # `_env_file=None` keeps a developer's local `.env` from influencing tests.
     # Production refuses a weak password cost, so those settings keep the floor.
     cost = MIN_PRODUCTION_COST_EXPONENT if environment == "production" else TEST_COST_EXPONENT
@@ -92,6 +93,7 @@ def build_settings(environment: Environment = "test") -> Settings:
         database_url="sqlite+aiosqlite://",
         password_hash_cost_exponent=cost,
         _env_file=None,
+        **overrides,
     )
 
 
@@ -144,8 +146,10 @@ class Harness:
     other_workspace: Workspace
     clients: list[TestClient] = field(default_factory=list)
 
-    def app_client(self, environment: Environment = "test") -> TestClient:
-        client = TestClient(create_app(build_settings(environment), self.session_factory))
+    def app_client(self, environment: Environment = "test", **settings: Any) -> TestClient:
+        client = TestClient(
+            create_app(build_settings(environment, **settings), self.session_factory)
+        )
         self.clients.append(client)
         return client
 
@@ -190,6 +194,20 @@ def no_real_model_provider() -> Iterator[None]:
         yield
     finally:
         use_gateway(None)
+
+
+async def _no_network(host: str) -> list[str]:
+    raise EgressBlocked("resolution", f"Tests do not resolve {host}.")
+
+
+@pytest.fixture(autouse=True)
+def no_real_egress() -> Iterator[None]:
+    """No test makes a real outbound request: names never resolve."""
+    use_egress(EgressGateway(resolver=_no_network))
+    try:
+        yield
+    finally:
+        use_egress(None)
 
 
 @pytest.fixture

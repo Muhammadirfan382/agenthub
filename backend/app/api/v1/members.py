@@ -17,6 +17,7 @@ from app.db.session import SessionDep
 from app.repositories import identity_repository
 from app.schemas.auth import MemberAddRequest, MemberRead, MemberRoleUpdate
 from app.schemas.enums import Role
+from app.security import audit
 from app.services import auth_service, authorization
 from app.services.auth_service import AuthContext
 from app.services.mappers import to_member_read
@@ -73,6 +74,15 @@ async def add_member(db: SessionDep, auth: AuthDep, body: MemberAddRequest) -> M
     membership = await auth_service.add_member(
         db, organization=auth.organization, user=user, role=body.role
     )
+    await audit.record(
+        db,
+        organization_id=auth.organization_id,
+        action="member.added",
+        actor=audit.user_actor(auth),
+        outcome="success",
+        target=("user", user.id),
+        detail={"role": body.role, "name": user.name},
+    )
     return to_member_read(membership, user)
 
 
@@ -88,7 +98,17 @@ async def set_member_role(
     authorization.require_can_manage_member(auth.role, cast(Role, membership.role))
     authorization.require_assignable_role(auth.role, body.role)
 
+    previous = membership.role
     updated = await auth_service.set_member_role(db, membership=membership, role=body.role)
+    await audit.record(
+        db,
+        organization_id=auth.organization_id,
+        action="member.role_changed",
+        actor=audit.user_actor(auth),
+        outcome="success",
+        target=("user", user.id),
+        detail={"from": previous, "to": body.role, "name": user.name},
+    )
     return to_member_read(updated, user)
 
 
@@ -97,11 +117,20 @@ async def set_member_role(
 )
 async def remove_member(db: SessionDep, auth: AuthDep, membership_id: str) -> Response:
     authorization.require(auth.role, "member:manage")
-    membership, _ = await _member_in_organization(db, membership_id, auth)
+    membership, removed = await _member_in_organization(db, membership_id, auth)
 
     if membership.user_id == auth.user_id:
         raise ForbiddenError("You cannot remove yourself from the organization.")
     authorization.require_can_manage_member(auth.role, cast(Role, membership.role))
 
     await auth_service.remove_member(db, membership=membership)
+    await audit.record(
+        db,
+        organization_id=auth.organization_id,
+        action="member.removed",
+        actor=audit.user_actor(auth),
+        outcome="success",
+        target=("user", removed.id),
+        detail={"role": membership.role, "name": removed.name},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

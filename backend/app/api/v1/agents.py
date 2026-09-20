@@ -97,7 +97,8 @@ async def delete_agent(session: SessionDep, auth: AuthDep, agent_id: str) -> Res
     summary="Request an execution",
     description=(
         "Queues a run. With a model provider configured, a real model drives it through "
-        "the model gateway; tools are checked but never executed."
+        "the model gateway; every tool call is checked by the policy engine, and only "
+        "api_request can run, as a read-only GET to the agent's allowed domains."
     ),
 )
 async def request_execution(

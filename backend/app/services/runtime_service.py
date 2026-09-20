@@ -13,6 +13,7 @@ from app.core.time import now_utc
 from app.db.models import Agent, Execution, ExecutionApproval, Organization
 from app.repositories import runtime_repository
 from app.schemas.enums import TERMINAL_STATUSES, ApprovalDecision
+from app.security import audit
 from app.services import authorization, execution_service
 from app.services.auth_service import AuthContext
 
@@ -39,6 +40,15 @@ async def cancel(session: AsyncSession, execution_id: str, *, context: AuthConte
 
     execution.cancel_requested_at = now_utc()
     execution.cancel_requested_by = context.user.name
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="execution.cancelled",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("execution", execution.id),
+        detail={},
+    )
     await session.flush()
     return execution
 
@@ -76,6 +86,15 @@ async def decide_approval(
     execution.status = "RUNNING"
     execution.claimed_by = None
     execution.heartbeat_at = None
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="approval.decided",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("execution", execution.id),
+        detail={"decision": decision, "tool": approval.tool, "capability": approval.capability},
+    )
     await session.flush()
     return approval
 
@@ -119,6 +138,15 @@ async def set_kill_switch(
             .values(cancel_requested_at=now_utc(), cancel_requested_by="the kill switch")
         )
 
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="runtime.kill_switch_engaged" if paused else "runtime.kill_switch_released",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("organization", organization.id),
+        detail={"reason": organization.executions_paused_reason},
+    )
     await session.flush()
     return organization
 

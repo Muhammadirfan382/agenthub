@@ -325,10 +325,38 @@ export interface LogEntry {
 }
 
 /**
- * Never "succeeded": no tool is executed in this release. `unavailable` means
- * every check allowed the call, but no implementation exists to run it.
+ * Only `api_request` can succeed: it is the one tool that runs, as an HTTPS GET
+ * through the egress gateway. `unavailable` means every check allowed the call,
+ * but no implementation exists to run it.
  */
-export type ToolCallStatus = 'pending' | 'simulated' | 'unavailable' | 'denied' | 'failed';
+export type ToolCallStatus =
+  | 'pending'
+  | 'simulated'
+  | 'unavailable'
+  | 'succeeded'
+  | 'denied'
+  | 'failed';
+
+/** One security-relevant decision, as the audit log recorded it. */
+export interface AuditEvent {
+  id: ID;
+  at: ISODate;
+  actorType: 'user' | 'agent' | 'system';
+  actorId: string | null;
+  actorName: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  outcome: 'success' | 'failure' | 'denied' | 'allowed';
+  /** Small, bounded facts. Never secrets or content. */
+  detail: Record<string, unknown>;
+}
+
+export interface AuditQuery {
+  /** Action prefix, e.g. `policy.` or `egress.`. */
+  action?: string;
+  outcome?: AuditEvent['outcome'];
+}
 
 export interface ToolCall {
   id: ID;

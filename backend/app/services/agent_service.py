@@ -19,6 +19,7 @@ from app.repositories import agent_repository
 from app.runtime.engine import RUNTIME_NAME
 from app.schemas.agent import AgentDraft
 from app.schemas.enums import AgentStatus, ExecutionTrigger
+from app.security import audit
 from app.services import authorization
 from app.services.auth_service import AuthContext
 from app.services.risk import derive_risk
@@ -116,6 +117,15 @@ async def create_agent(session: AsyncSession, draft: AgentDraft, *, context: Aut
         **documents,
     )
     session.add(agent)
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="agent.created",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent", agent.id),
+        detail={"name": agent.name},
+    )
     await session.flush()
     return agent
 
@@ -161,12 +171,30 @@ async def update_agent(
     for field, value in documents.items():
         setattr(agent, field, value)
 
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="agent.updated",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent", agent.id),
+        detail={"name": agent.name},
+    )
     await session.flush()
     return agent
 
 
 async def delete_agent(session: AsyncSession, agent_id: str, *, context: AuthContext) -> None:
     agent = await _agent_for_change(session, agent_id, context=context, action="agent:delete")
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="agent.deleted",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent", agent.id),
+        detail={"name": agent.name},
+    )
     await session.delete(agent)
 
 
@@ -186,6 +214,15 @@ async def set_status(
 
     agent.status = status
     agent.updated_at = now_utc()
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="agent.status_changed",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent", agent.id),
+        detail={"status": agent.status},
+    )
     await session.flush()
     return agent
 

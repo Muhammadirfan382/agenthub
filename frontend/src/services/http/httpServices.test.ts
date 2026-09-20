@@ -196,6 +196,7 @@ describe('api mode services', () => {
       'marketplace',
       'installations',
       'runtime',
+      'audit',
     ]);
   });
 

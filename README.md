@@ -31,9 +31,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 5 | Agent runtime: orchestration, approvals, budgets, kill switch | ✅ Complete |
 | 6 | Docker sandbox: isolated, verified containers per run | ✅ Complete (real-container tests run in CI only) |
 | 7 | AI/LLM: model gateway, Claude and OpenAI adapters, tool gateway | ✅ Complete (no live provider call made; see below) |
-| 8–10 | Security, monitoring, deployment | ⏳ Not started |
+| 8 | Security layer: policy engine, egress gateway, audit log, CSP, scanning | ✅ Complete |
+| 9–10 | Monitoring, deployment | ⏳ Not started |
 
-**What exists today (Phases 0–7):**
+**What exists today (Phases 0–8):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -50,13 +51,13 @@ aims to make that safe to do inside an organization by combining two things:
   - An execution runtime that orchestrates runs: a durable queue and worker, per-run budgets for time, tokens and tool calls, pauses for human approval, cancellation, an organization-wide kill switch, and a recorded timeline, logs and tool calls streamed to the UI.
   - A sandbox: before each run the runtime starts an ephemeral, non-root, read-only, capability-free, network-less and resource-limited container, checks 13 isolation guarantees from inside it, records the result on the run, and fails the run if any guarantee does not hold. Without a container runtime, runs are recorded as simulations, or refused when `REQUIRE_SANDBOX=true`.
   - A model gateway: with `AGENTHUB_ANTHROPIC_API_KEY` (or `AGENTHUB_OPENAI_API_KEY`) set, a real model answers each run. Agents pick a tier; the deployment routes it to a model. Every request is rate limited, budgeted and metered per organization, and credentials never leave the server.
-  - **No tool is executed.** Tools the model asks for are checked against the agent's grants, a strict schema and human approval, then recorded as not executed: real tools need the egress protection planned for Phase 8. Without a key, runs are simulated and say so.
+  - A security layer: every tool call is decided by a policy engine from what the agent declared (allowed domains, egress mode, which risk levels need a person), and the only way out of the server is an SSRF-safe egress gateway - HTTPS GET, allow-listed hosts, public addresses only, connections pinned against DNS rebinding, no redirects, bounded. `api_request` runs through it; every other tool is still recorded as not executed. What it fetches reaches the model labelled as untrusted data.
+  - An append-only audit log of security decisions (sign-ins, roles, the kill switch, approvals, policy refusals, every outbound request), readable by administrators; a strict Content-Security-Policy; per-client write limits; dependency and secret scanning in CI with actions pinned to commits. A [threat model](docs/THREAT_MODEL.md) and a [security review](docs/SECURITY_REVIEW.md) say what is and is not covered.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
-email verification), an audit log, tool execution, an egress
-gateway, scheduled triggers, real security scanning (the verification label
+email verification), tools other than `api_request`, scheduled triggers, real security scanning (the verification label
 is stored, not earned), monitoring and deployment.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
@@ -243,8 +244,8 @@ Full descriptions: [docs/ROADMAP.md](docs/ROADMAP.md).
   and never treated as instructions to the platform.
 - **Isolation.** Agent code will run only inside sandboxes with no host access, no
   ambient credentials and limited resources. The sandbox exists and is checked
-  before every run. Models answer through a gateway outside it, and no tool is
-  executed until egress controls exist.
+  before every run. Models answer through a gateway outside it, and the only
+  request an agent can make is a read-only, allow-listed HTTPS GET.
 - **No secrets in code, Git or the browser.** Configuration comes from the
   environment; real values live outside the repository.
 - **Honesty over appearance.** Placeholder or mocked functionality is labelled as

@@ -17,7 +17,11 @@ from app.api.v1.router import api_router
 from app.core.config import API_V1_PREFIX, SERVICE_VERSION, Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import (
+    RequestContextMiddleware,
+    SecurityHeadersMiddleware,
+    WriteRateLimitMiddleware,
+)
 from app.core.security import configure_password_cost
 from app.db.session import create_engine, create_session_factory
 from app.runtime.worker import work_loop, worker_name
@@ -88,7 +92,8 @@ def create_app(
         app.state.engine = None
         app.state.session_factory = session_factory
     # Outermost middleware runs first on the way in and last on the way out.
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(WriteRateLimitMiddleware, limit=resolved.write_requests_per_minute)
+    app.add_middleware(SecurityHeadersMiddleware, hsts=resolved.environment == "production")
     app.add_middleware(RequestContextMiddleware)
     install_error_handlers(app)
     app.include_router(api_router, prefix=API_V1_PREFIX)

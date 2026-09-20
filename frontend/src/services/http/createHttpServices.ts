@@ -3,6 +3,7 @@ import type { Services, SystemService } from '../contracts';
 import { createDemoServices } from '../demo/createDemoServices';
 import { httpAgentService } from './agentApi';
 import { httpAuthService, httpMemberService } from './authApi';
+import { httpAuditService } from './auditApi';
 import { httpExecutionService, httpRuntimeService } from './executionApi';
 import { httpInstallationService, httpMarketplaceService } from './registryApi';
 import { fetchBackendHealth } from './systemApi';
@@ -57,6 +58,7 @@ export function createHttpServices(): Services {
       'marketplace',
       'installations',
       'runtime',
+      'audit',
     ],
     agents: httpAgentService,
     executions: httpExecutionService,
@@ -66,5 +68,6 @@ export function createHttpServices(): Services {
     marketplace: httpMarketplaceService,
     installations: httpInstallationService,
     runtime: httpRuntimeService,
+    audit: httpAuditService,
   };
 }

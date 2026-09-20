@@ -1,6 +1,7 @@
 """ORM models."""
 
 from app.db.models.agent import Agent
+from app.db.models.audit import AuditEvent
 from app.db.models.execution import (
     Execution,
     ExecutionApproval,
@@ -15,6 +16,7 @@ from app.db.models.usage import ModelUsage
 __all__ = [
     "Agent",
     "AgentVersion",
+    "AuditEvent",
     "Execution",
     "ExecutionApproval",
     "ExecutionEvent",

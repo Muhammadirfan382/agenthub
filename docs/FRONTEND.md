@@ -139,16 +139,33 @@ authorization control.
   A 404 on a detail request becomes `null`; other failures raise `ApiError`
   carrying the backend's own `code` and `message`.
 
+### Security (Phase 8)
+
+- **Settings → Audit log** (administrators only) lists what the server
+  recorded, filtered by area and outcome. Other roles are told plainly that the
+  log is not theirs to read, and the app does not request it at all.
+- **Content-Security-Policy:** the production build carries a strict policy
+  (`'self'` only, no inline script or style, no eval) as a meta tag, generated
+  by `src/config/contentSecurityPolicy.ts` at build time. The development server
+  needs inline scripts for hot reload, so the policy is build-only. A meta tag
+  cannot set `frame-ancestors`; the host serving the build must send that
+  header itself.
+- **Tool calls that ran** show as *Ran (GET)*; everything else still shows as
+  *Not executed*, *Denied by policy* or *Failed*.
+- Audit detail, model text and fetched content are all rendered as plain text.
+
 ### Models (Phase 7)
 
 - **Starting a run** opens a dialog with an optional task, sent to the model as
-  the request. It says plainly that tools are checked but never executed.
+  the request. It says plainly that every tool call is checked, and that only
+  read-only requests to the agent's allowed domains can run.
 - **The execution page** shows the model tier with *Live model* or *Simulated*,
   the route, the estimated cost, the task, and the **Conversation**: the
   request, each model turn, the tools it asked for and what the tool gateway
   told it. Every word of it is untrusted and rendered as plain text; nothing is
   interpreted as markup or made clickable.
-- Tool calls allowed by policy show as **Not executed**, never as succeeded.
+- Tool calls allowed by policy but with no implementation show as **Not
+  executed**; `api_request` shows as **Ran (GET)**.
 - **Settings → Runtime → Model gateway** shows which providers have credentials
   (never the credentials), each tier's route and whether it is live, the limits,
   and today's requests, tokens and estimated spend.

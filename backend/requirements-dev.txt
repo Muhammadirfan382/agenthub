@@ -4,9 +4,11 @@
 #   aiosqlite async SQLite driver: local development and fast tests without Docker
 #   ruff      linting (incl. flake8-bandit security rules) and formatting
 #   mypy      static type checking
+#   pip-audit PyPA's dependency vulnerability audit, run in CI's security job
 -r requirements.txt
 aiosqlite==0.22.1
 httpx2==2.13.0
 mypy==2.3.1
+pip-audit==2.10.1
 pytest==9.1.1
 ruff==0.16.7

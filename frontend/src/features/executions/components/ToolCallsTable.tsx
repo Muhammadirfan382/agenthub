@@ -10,6 +10,8 @@ const STATUS: Record<ToolCallStatus, { label: string; tone: BadgeTone }> = {
   simulated: { label: 'Simulated', tone: 'info' },
   // Allowed by every check, but no tool implementation exists to run it.
   unavailable: { label: 'Not executed', tone: 'neutral' },
+  // api_request, after every check, through the egress gateway.
+  succeeded: { label: 'Ran (GET)', tone: 'success' },
   failed: { label: 'Failed', tone: 'danger' },
   denied: { label: 'Denied by policy', tone: 'high' },
   pending: { label: 'Pending', tone: 'warning' },

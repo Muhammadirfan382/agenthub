@@ -10,8 +10,9 @@ and decides how it will be driven:
 * **simulated** - no provider is configured, so the scripted plan derived from
   the agent's declaration is recorded instead, and says so at every step.
 
-In neither mode is a tool executed: none has an implementation until the
-egress protections of Phase 8 exist. Nothing runs inside the sandbox either.
+In model mode every tool call goes through the policy engine; only
+``api_request`` can run, as a read-only GET through the egress gateway, and
+nothing runs inside the sandbox.
 """
 
 import logging

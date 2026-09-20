@@ -22,7 +22,8 @@ export type PermissionAction =
   | 'runtime:resume'
   | 'member:read'
   | 'member:manage'
-  | 'organization:manage';
+  | 'organization:manage'
+  | 'audit:read';
 
 const RANK: Record<Role, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
 
@@ -43,6 +44,8 @@ const MINIMUM_ROLE: Record<PermissionAction, Role> = {
   'runtime:pause': 'admin',
   'runtime:resume': 'owner',
   'organization:manage': 'owner',
+  // Who did what is sensitive in itself: members and viewers do not see it.
+  'audit:read': 'admin',
 };
 
 /** Actions a member may also perform on an agent they own. */

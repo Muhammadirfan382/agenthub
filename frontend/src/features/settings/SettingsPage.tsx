@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { TabPanel, Tabs } from '@/components/ui/Tabs';
 import { AgentPreferencesSettings } from './sections/AgentPreferencesSettings';
 import { ApiSettings } from './sections/ApiSettings';
+import { AuditSettings } from './sections/AuditSettings';
 import { AppearanceSettings } from './sections/AppearanceSettings';
 import { MembersSettings } from './sections/MembersSettings';
 import { RuntimeSettings } from './sections/RuntimeSettings';
@@ -18,6 +19,7 @@ const SECTIONS = [
   { id: 'security', label: 'Security' },
   { id: 'members', label: 'Members' },
   { id: 'runtime', label: 'Runtime' },
+  { id: 'audit', label: 'Audit log' },
   { id: 'api', label: 'API' },
   { id: 'agents', label: 'Agent preferences' },
 ] as const;
@@ -32,7 +34,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Your profile, appearance, notifications, security, members, runtime controls, API access and agent defaults." />
+      <PageHeader title="Settings" description="Your profile, appearance, notifications, security, members, runtime controls, audit log, API access and agent defaults." />
       <Tabs
         label="Settings sections"
         idPrefix={idPrefix}
@@ -47,6 +49,7 @@ export default function SettingsPage() {
         {section === 'security' && <SecuritySettings />}
         {section === 'members' && <MembersSettings />}
         {section === 'runtime' && <RuntimeSettings />}
+        {section === 'audit' && <AuditSettings />}
         {section === 'api' && <ApiSettings />}
         {section === 'agents' && <AgentPreferencesSettings />}
       </TabPanel>

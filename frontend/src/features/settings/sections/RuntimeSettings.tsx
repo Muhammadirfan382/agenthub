@@ -176,9 +176,11 @@ function RuntimeControls({ state }: { state: RuntimeState }) {
             every request. Otherwise the run is <code className="font-mono text-xs">simulated</code>.
           </p>
           <p>
-            Tools the model asks for are checked against the agent's permissions and approvals, and
-            then <strong className="font-medium text-fg">not executed</strong>: no tool has an
-            implementation yet. Each run also gets an isolated container, checked before it starts;
+            Every tool the model asks for goes through the policy engine: the agent's grants,
+            its declared egress mode and allowed domains, and approval by risk. Only{' '}
+            <code className="font-mono text-xs">api_request</code> can run, as a read-only HTTPS
+            GET to an allowed domain through the egress gateway; every other tool is recorded as
+            not executed. Each run also gets an isolated container, checked before it starts;
             nothing runs inside it.
           </p>
           {state.pendingApprovals > 0 && (

@@ -27,6 +27,7 @@ Action = Literal[
     "member:read",
     "member:manage",
     "organization:manage",
+    "audit:read",
 ]
 
 #: The lowest role that may perform each action on any resource in the organization.
@@ -49,6 +50,8 @@ MINIMUM_ROLE: dict[Action, Role] = {
     "runtime:pause": "admin",
     "runtime:resume": "owner",
     "organization:manage": "owner",
+    # Who did what is sensitive in itself: members and viewers do not see it.
+    "audit:read": "admin",
 }
 
 #: Actions a member may also perform on an agent they own.

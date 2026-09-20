@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type {
+  AuditEvent,
   Agent,
   AgentPermission,
   Approval,
@@ -187,6 +188,19 @@ const sandboxStatusShape = {
   detail: z.string(),
 };
 
+export const AuditEventSchema: z.ZodType<AuditEvent> = z.object({
+  id,
+  at: iso,
+  actorType: z.enum(['user', 'agent', 'system']),
+  actorId: z.string().nullable(),
+  actorName: z.string(),
+  action: z.string(),
+  targetType: z.string().nullable(),
+  targetId: z.string().nullable(),
+  outcome: z.enum(['success', 'failure', 'denied', 'allowed']),
+  detail: z.record(z.string(), z.unknown()),
+});
+
 export const ModelGatewayStatusSchema: z.ZodType<ModelGatewayStatus> = z.object({
   enabled: z.boolean(),
   providers: z.array(z.object({ name: z.string(), configured: z.boolean() })),
@@ -256,7 +270,7 @@ export const ExecutionDetailSchema: z.ZodType<ExecutionDetail> = z.object({
       id,
       tool: z.string(),
       capability: z.string(),
-      status: z.enum(['pending', 'simulated', 'unavailable', 'denied', 'failed']),
+      status: z.enum(['pending', 'simulated', 'unavailable', 'succeeded', 'denied', 'failed']),
       startedAt: iso,
       durationMs: z.number().nullable(),
       inputSummary: z.string(),

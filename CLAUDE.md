@@ -68,9 +68,17 @@ variable is available unless it has been deliberately granted.
 - Enforce authorization server-side for every action, on every request.
 - Use least privilege for services, database roles, CI jobs and containers.
 - Keep security-relevant decisions auditable.
-- Agent execution **must** eventually run in an isolated sandbox: no host access,
-  no ambient credentials, resource limits, egress only through an allow-listing
-  gateway. Until that exists, agents are not executed at all.
+- Agent execution **must** run in an isolated sandbox: no host access, no
+  ambient credentials, resource limits, egress only through an allow-listing
+  gateway.
+- Every outbound request an agent causes goes through
+  `backend/app/security/egress.py`, and every agent action through
+  `backend/app/security/policy.py`. Never fetch a model-supplied URL anywhere
+  else, never follow redirects, never accept an IP literal or a host outside
+  the agent's allowed domains, and never weaken a rule to make something work.
+- Security-relevant decisions are recorded with `backend/app/security/audit.py`.
+  The log is append-only: never add an endpoint or code path that edits or
+  deletes an event, and never put a secret, a prompt or fetched content in one.
 - The sandbox's guarantees live in `backend/app/sandbox/spec.py` and are
   asserted by `backend/tests/test_sandbox_spec.py`. Never weaken either to make
   something work: no mounts, no `--env`, no socket, no added capabilities, no

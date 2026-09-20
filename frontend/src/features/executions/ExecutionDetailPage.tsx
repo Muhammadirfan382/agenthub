@@ -279,7 +279,12 @@ function liveNotice(execution: ExecutionDetail): string {
       ? 'A verified, isolated container was created for it, but nothing ran inside it.'
       : 'No sandbox was available, and nothing ran on the host either.';
   if (execution.mode === 'model') {
-    return `A real model (${execution.modelRoute ?? 'unknown route'}) answered this run through the model gateway. Tools it asked for were checked against the agent's permissions but never executed. ${box}`;
+    const ran = execution.toolCalls.filter((call) => call.status === 'succeeded').length;
+    const tools =
+      ran > 0
+        ? `${ran} read-only ${ran === 1 ? 'request' : 'requests'} went out through the egress gateway, to this agent's allowed domains only; nothing else ran.`
+        : 'No tool ran: every call was refused, held for approval, or has no implementation.';
+    return `A real model (${execution.modelRoute ?? 'unknown route'}) answered this run through the model gateway. ${tools} ${box}`;
   }
   return `No model provider was configured, so this run was simulated: no model was called and no tool was run. ${box}`;
 }

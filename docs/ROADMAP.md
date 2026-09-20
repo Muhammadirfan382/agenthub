@@ -200,6 +200,35 @@ for OpenAI models, and rate limits shared across processes.
 - Dependency and secret scanning in CI; SHA-pinned CI actions; threat model and
   security review.
 
+**Delivered:** a policy engine that enforces what each agent declared -
+`networkEgress`, `allowedDomains` and approval by risk level, none of which the
+runtime honoured before; an SSRF-safe egress gateway (https only, allow-listed
+hosts, public addresses only, connections pinned against DNS rebinding, no
+redirects, bounded size and time) which is the only way a request leaves the
+server; `api_request` running through it as a read-only GET, with what it
+fetched handed to the model as labelled untrusted content; an append-only audit
+log with an admin-only read API and an Audit log screen; a strict CSP on the
+built app and on API responses, plus cross-origin isolation and HSTS; per-client
+write rate limiting; secrets from file mounts (`SECRETS_DIR`); and a CI
+`security` job (pip-audit, npm audit, gitleaks over full history) with every
+action pinned to a commit SHA and Dependabot proposing updates. Adversarial
+containment evaluations, a [threat model](THREAT_MODEL.md) and a
+[security review](SECURITY_REVIEW.md) ship with it. See [BACKEND.md](BACKEND.md) §9.
+
+**How it is verified:** the egress gateway against a replaced resolver and a
+recording transport; the policy engine and untrusted wrapper as pure functions;
+the audit log, headers, write limit and secrets through the API; and
+`test_containment.py`, where a scripted fully-hijacked model tries to
+exfiltrate, reach cloud metadata, write, and smuggle instructions back - each
+scenario asserting nothing left the server. The production build was loaded in
+a browser to confirm it runs under the strict CSP with no violations.
+
+**Deliberately not in this phase:** executing any tool other than
+`api_request`, preventing (rather than containing) prompt injection, live
+adversarial evaluations against real models - which need a provider key and
+were not run - rate limits shared across processes, vault integration, and a
+custom seccomp profile. No independent review or penetration test was done.
+
 ## Phase 9: Monitoring
 
 **Objective:** make the system observable and auditable.

@@ -72,7 +72,7 @@ export function useAgentActions({ onDeleted }: Options = {}) {
       <ConfirmDialog
         open={pending?.kind === 'execute'}
         title={pending ? `Run ${pending.agent.name}?` : 'Run agent?'}
-        description="A real model answers if one is configured for this agent's tier; otherwise the run is simulated. Tools the model asks for are checked against this agent's permissions but never executed."
+        description="A real model answers if one is configured for this agent's tier; otherwise the run is simulated. Every tool the model asks for is checked against this agent's permissions and security policy; only read-only requests to its allowed domains can run."
         confirmLabel="Start run"
         pending={execute.isPending}
         onConfirm={() => pending && confirmExecute(pending.agent)}

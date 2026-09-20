@@ -51,12 +51,13 @@ ExecutionRuntime = Literal["simulation", "sandbox"]
 ExecutionMode = Literal["model", "simulated"]
 TimelineKind = Literal["lifecycle", "model", "tool", "policy", "error", "result"]
 LogLevel = Literal["debug", "info", "warn", "error"]
-#: Never "succeeded": no tool is executed in this release.
+#: Only api_request can succeed: it is the one tool that runs (Phase 8).
+#:   succeeded   - it ran through the egress gateway and a response came back.
 #:   unavailable - allowed by every check, but no implementation exists to run it.
 #:   simulated   - recorded by the scripted plan of a simulated run.
 #:   denied      - refused by policy or by a person.
 #:   failed      - rejected, e.g. arguments that did not match the tool's schema.
-ToolCallStatus = Literal["pending", "simulated", "unavailable", "denied", "failed"]
+ToolCallStatus = Literal["pending", "simulated", "unavailable", "succeeded", "denied", "failed"]
 ApprovalStatus = Literal["pending", "approved", "denied"]
 ApprovalDecision = Literal["approved", "denied"]
 ExecutionTrigger = Literal["manual", "schedule", "api"]

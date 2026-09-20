@@ -3,9 +3,9 @@
 A run carries two independent facts about how it was produced: `runtime`
 (`sandbox` when a verified container was created for it, `simulation` when
 none was available) and `mode` (`model` when a real model answered through the
-gateway, `simulated` when no provider was configured). No tool is ever executed
-in this release, so tool calls are recorded as `unavailable`, `denied` or
-`simulated`, never as succeeded.
+gateway, `simulated` when no provider was configured). Only `api_request` ever
+runs - a read-only GET through the egress gateway - so a tool call is recorded
+as `succeeded` only for that; every other allowed call is `unavailable`.
 """
 
 from datetime import datetime

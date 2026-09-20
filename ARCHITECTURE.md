@@ -74,7 +74,8 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
   enforcement remains server-side.
 - Safe rendering of agent output: model and tool text is rendered as plain text
   today (Phase 7); sanitized Markdown may follow, never raw HTML.
-- Content Security Policy and security headers at the hosting layer (Phase 8/10).
+- Content Security Policy in the built app and on API responses (Phase 8); the
+  host must also send `frame-ancestors` as a header (Phase 10).
 
 ---
 
@@ -103,6 +104,10 @@ Phase 1 is complete. Full details are in [docs/FRONTEND.md](docs/FRONTEND.md).
   run step by step, enforces the budget it was given, pauses for human approval,
   honours cancellation and an organization-wide kill switch, and records a
   timeline, logs and tool calls.
+- Security layer (Phase 8): a policy engine that enforces each agent's declared
+  security policy, an SSRF-safe egress gateway (the only way a request leaves
+  the server), an append-only audit log, CSP and security headers, per-client
+  write limits, and secret files. See §7, [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 - Model gateway (Phase 7): tiers route to Claude or OpenAI models through
   official SDKs; every request is rate limited, budgeted and metered per
   organization. A tool gateway checks every tool call the model makes and
@@ -186,9 +191,11 @@ kill switch.
   call goes through the **model gateway** (`backend/app/llm/`): tier routing,
   provider adapters behind a neutral interface, per-organization rate and daily
   token limits, and a usage ledger with estimated cost.
-- **The tool gateway** checks each tool call against the agent's grants, a
-  strict per-tool schema and human approval, then records it as not executed:
-  no tool has an implementation until egress controls exist (Phase 8).
+- **The tool gateway** checks each tool call against the agent's grants and a
+  strict per-tool schema, then the **policy engine** (§7) decides from the
+  agent's declared security policy. Only `api_request` runs - a read-only GET
+  through the egress gateway - and every other allowed tool is recorded as not
+  executed.
 - **Simulated runs.** Without a provider the scripted plan is recorded, and the
   run says so.
 
@@ -273,8 +280,17 @@ placeholders.
   credentials.
 - Authentication, role-based authorization, CSRF protection and sign-in
   throttling (Phase 3); execution isolation checks (Phase 6, §6).
-- **Not implemented:** CSP, secret management, general API rate limiting, an
-  audit log, and dependency or secret scanning in CI.
+- Security layer (Phase 8): the policy engine decides every agent action from
+  facts a model cannot change; the egress gateway refuses anything but HTTPS
+  GETs to allow-listed hosts on public addresses, with pinned connections and
+  no redirects; fetched content is labelled untrusted; an append-only audit log
+  records security decisions; CSP and security headers everywhere; per-client
+  write limits; secrets from file mounts. Threat model and review:
+  [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md),
+  [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+- **Not implemented:** vault-based secret management, rate limits shared across
+  processes, prevention (rather than containment) of prompt injection, and any
+  independent security review or penetration test.
 
 ### Planned architecture
 

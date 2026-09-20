@@ -5,11 +5,15 @@ injected into the page — cannot read it. A second, readable cookie carries the
 CSRF token that every state-changing request must echo back in a header.
 """
 
+import logging
+
 from fastapi import APIRouter, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from starlette.background import BackgroundTask
 
 from app.api.deps import AuthDep, SettingsDep
 from app.core.config import CSRF_COOKIE, SESSION_COOKIE, Settings
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, UnauthorizedError, api_error_response
 from app.db.session import SessionDep
 from app.repositories import identity_repository
 from app.schemas.auth import (
@@ -20,10 +24,13 @@ from app.schemas.auth import (
     SessionRead,
     UserRead,
 )
+from app.security import audit
 from app.services import auth_service
 from app.services.auth_service import AuthContext
 from app.services.login_guard import LoginGuard, client_address
 from app.services.mappers import to_session_read, to_user_read
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -70,16 +77,22 @@ async def login(
     db: SessionDep,
     settings: SettingsDep,
     body: LoginRequest,
-) -> SessionRead:
+) -> SessionRead | Response:
     guard: LoginGuard = request.app.state.login_guard
     address = client_address(request)
     guard.check(email=body.email, address=address)
 
     try:
         user = await auth_service.authenticate(db, email=body.email, password=body.password)
-    except UnauthorizedError:
+    except UnauthorizedError as failure:
         guard.record_failure(email=body.email, address=address)
-        raise
+        # Recorded after the response is sent: doing this work only for accounts
+        # that exist would make their responses slower, and so reveal which do.
+        refused = api_error_response(failure)
+        refused.background = BackgroundTask(
+            _audit_failed_login, request.app.state.session_factory, body.email
+        )
+        return refused
     guard.record_success(email=body.email)
 
     memberships = await identity_repository.list_memberships_for_user(db, user.id)
@@ -103,6 +116,13 @@ async def login(
     _set_session_cookies(response, settings, token, csrf_token)
 
     context = AuthContext(user=user, organization=organization, membership=membership, session=row)
+    await audit.record(
+        db,
+        organization_id=organization.id,
+        action="auth.login",
+        actor=audit.user_actor(context),
+        target=("user", user.id),
+    )
     return to_session_read(context, memberships)
 
 
@@ -115,6 +135,15 @@ async def read_session(db: SessionDep, auth: AuthDep) -> SessionRead:
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, summary="Sign out")
 async def logout(db: SessionDep, settings: SettingsDep, auth: AuthDep) -> Response:
     await auth_service.revoke_session(db, auth.session)
+    await audit.record(
+        db,
+        organization_id=auth.organization_id,
+        action="auth.logout",
+        actor=audit.user_actor(auth),
+        outcome="success",
+        target=("user", auth.user_id),
+        detail={},
+    )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_session_cookies(response, settings)
     return response
@@ -128,6 +157,15 @@ async def change_password(db: SessionDep, auth: AuthDep, body: PasswordChangeReq
         current_password=body.current_password,
         new_password=body.new_password,
         keep_session_id=auth.session.id,
+    )
+    await audit.record(
+        db,
+        organization_id=auth.organization_id,
+        action="auth.password_changed",
+        actor=audit.user_actor(auth),
+        outcome="success",
+        target=("user", auth.user_id),
+        detail={},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -152,3 +190,32 @@ async def switch_organization(
     )
     memberships = await identity_repository.list_memberships_for_user(db, auth.user_id)
     return to_session_read(context, memberships)
+
+
+async def _audit_failed_login(factory: async_sessionmaker[AsyncSession], email: str) -> None:
+    """Records a failed sign-in to an account that exists, in each of its organizations.
+
+    Nothing is recorded for an unknown address: there is no organization whose
+    log it belongs in, and the address itself is not stored anywhere. Runs on its
+    own session, after the response: see the caller.
+    """
+    try:
+        async with factory() as db:
+            user = await identity_repository.get_user_by_email(
+                db, auth_service.normalise_email(email)
+            )
+            if user is None:
+                return
+            memberships = await identity_repository.list_memberships_for_user(db, user.id)
+            for _membership, organization in memberships:
+                await audit.record(
+                    db,
+                    organization_id=organization.id,
+                    action="auth.login_failed",
+                    actor=audit.Actor("user", user.id, user.name),
+                    outcome="failure",
+                    target=("user", user.id),
+                )
+            await db.commit()
+    except Exception:
+        logger.exception("could not record a failed sign-in")

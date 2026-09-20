@@ -26,6 +26,7 @@ from app.schemas.execution import (
     SandboxStatus,
 )
 from app.schemas.models import ModelGatewayStatus
+from app.security import audit
 from app.services import authorization, runtime_service
 
 router = APIRouter(prefix="/organization", tags=["organization"])
@@ -104,7 +105,9 @@ async def get_sandbox_status(auth: AuthDep, settings: SettingsDep) -> SandboxSta
     summary="Start a sandbox and check what it can do",
     description="Runs one throwaway container and reports each isolation guarantee.",
 )
-async def check_sandbox(auth: AuthDep, settings: SettingsDep) -> SandboxCheckResult:
+async def check_sandbox(
+    session: SessionDep, auth: AuthDep, settings: SettingsDep
+) -> SandboxCheckResult:
     # Starting containers is an administrative action, not a read.
     authorization.require(auth.role, "runtime:pause")
     sandbox = get_sandbox(settings)
@@ -119,6 +122,15 @@ async def check_sandbox(auth: AuthDep, settings: SettingsDep) -> SandboxCheckRes
         timeout_seconds=settings.sandbox_timeout_seconds,
     )
     result = await sandbox.probe(spec)
+    await audit.record(
+        session,
+        organization_id=auth.organization_id,
+        action="sandbox.checked",
+        actor=audit.user_actor(auth),
+        outcome="success" if result.isolated else "failure",
+        target=("organization", auth.organization_id),
+        detail={"isolated": result.isolated, "summary": result.report.summary()},
+    )
     detail = result.error or result.report.summary()
     payload = _sandbox_status(settings, available=result.started, detail=detail)
     payload["report"] = result.report.as_dict()

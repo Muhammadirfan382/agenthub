@@ -26,12 +26,22 @@ from app.schemas.registry import (
     PublishRequest,
     VersionStatusUpdate,
 )
+from app.security import audit
 from app.services import agent_service, authorization
 from app.services.auth_service import AuthContext
 from app.services.catalog import TOOL_CAPABILITIES
 from app.services.risk import derive_risk, permission_risk
 
 MIN_SCOPE_LENGTH = 3
+
+
+def _granted(installation: Installation) -> list[str]:
+    """The capabilities an installation grants, for the audit record."""
+    return [
+        str(grant.get("capability"))
+        for grant in installation.grants
+        if grant.get("level") != "denied"
+    ]
 
 
 def new_version_id() -> str:
@@ -120,6 +130,15 @@ async def publish_version(
     if body.visibility is not None:
         agent.visibility = body.visibility
     agent.updated_at = now
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="version.published",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent_version", version.id),
+        detail={"agent": version.agent_id, "version": version.version},
+    )
     await session.flush()
     return version
 
@@ -153,6 +172,15 @@ async def set_version_status(
         version.deprecated_at = now_utc()
 
     version.status = body.status
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="version.status_changed",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent_version", version.id),
+        detail={"status": version.status},
+    )
     await session.flush()
     return version
 
@@ -171,6 +199,15 @@ async def set_visibility(
 
     agent.visibility = visibility
     agent.updated_at = now_utc()
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="agent.visibility_changed",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("agent", agent.id),
+        detail={"visibility": agent.visibility},
+    )
     await session.flush()
     return agent
 
@@ -311,6 +348,18 @@ async def install(
         updated_at=now,
     )
     session.add(installation)
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="installation.created",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("installation", installation.id),
+        detail={
+            "agent": installation.agent_name,
+            "grants": _granted(installation),
+        },
+    )
     await session.flush()
     return installation
 
@@ -346,6 +395,18 @@ async def update_installation(
         installation.note = body.note
 
     installation.updated_at = now_utc()
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="installation.updated",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("installation", installation.id),
+        detail={
+            "status": installation.status,
+            "grants": _granted(installation),
+        },
+    )
     await session.flush()
     return installation
 
@@ -353,5 +414,14 @@ async def update_installation(
 async def uninstall(session: AsyncSession, installation_id: str, *, context: AuthContext) -> None:
     authorization.require(context.role, "installation:manage")
     installation = await get_installation(session, installation_id, context=context)
+    await audit.record(
+        session,
+        organization_id=context.organization_id,
+        action="installation.removed",
+        actor=audit.user_actor(context),
+        outcome="success",
+        target=("installation", installation.id),
+        detail={"agent": installation.agent_name},
+    )
     await session.delete(installation)
     await session.flush()
