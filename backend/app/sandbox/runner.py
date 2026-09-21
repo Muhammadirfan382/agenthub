@@ -12,6 +12,7 @@ and no container may be left behind.
 import asyncio
 import json
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -82,6 +83,47 @@ class UnavailableSandbox:
         )
 
 
+#: The only variables the container CLI is given. The worker's environment holds
+#: the database URL and provider keys; the CLI needs none of them, and a CLI
+#: plugin or wrapper script should not be able to read them.
+RUNTIME_ENVIRONMENT = (
+    # Finding and running the CLI.
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    # Which daemon to talk to: the rootless socket in production.
+    "DOCKER_HOST",
+    "DOCKER_CONTEXT",
+    "DOCKER_CONFIG",
+    "DOCKER_CERT_PATH",
+    "DOCKER_TLS_VERIFY",
+    "CONTAINER_HOST",
+    "XDG_RUNTIME_DIR",
+    # What a Windows process needs to start at all.
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+)
+
+
+def runtime_environment(source: dict[str, str] | None = None) -> dict[str, str]:
+    """The allow-listed part of `source` (default: this process's environment)."""
+    values = os.environ if source is None else source
+    # Windows environment names are case-insensitive; compare them that way.
+    wanted = {name.upper() for name in RUNTIME_ENVIRONMENT}
+    return {name: value for name, value in values.items() if name.upper() in wanted}
+
+
 def _truncate(raw: bytes) -> str:
     text = raw[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
     if len(raw) > MAX_OUTPUT_BYTES:
@@ -108,6 +150,7 @@ class ContainerSandbox:
             stderr=asyncio.subprocess.PIPE,
             # The container gets nothing on stdin, ever.
             stdin=asyncio.subprocess.DEVNULL,
+            env=runtime_environment(),
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)

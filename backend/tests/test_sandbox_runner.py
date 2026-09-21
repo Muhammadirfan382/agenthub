@@ -44,7 +44,8 @@ arguments = sys.argv[1:]
 stdin_text = sys.stdin.read()
 
 with open(os.path.join(HERE, "calls.jsonl"), "a", encoding="utf-8") as log:
-    log.write(json.dumps({"arguments": arguments, "stdin": stdin_text}) + "\\n")
+    record = {"arguments": arguments, "stdin": stdin_text, "environment": sorted(os.environ)}
+    log.write(json.dumps(record) + "\\n")
 
 subcommand = arguments[0] if arguments else ""
 
@@ -175,6 +176,23 @@ class TestWhatTheRunnerAsksFor:
         probe(ContainerSandbox(runtime.command), spec)
 
         assert all(call["stdin"] == "" for call in runtime.calls)
+
+    def test_the_runtime_cli_is_not_given_the_worker_s_secrets(
+        self, runtime: FakeRuntime, spec: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user@db.invalid/agenthub")
+        monkeypatch.setenv("AGENTHUB_ANTHROPIC_API_KEY", "not-a-real-key")
+        monkeypatch.setenv("METRICS_TOKEN", "not-a-real-token")
+        monkeypatch.setenv("DOCKER_HOST", "unix:///run/agenthub-sandbox/docker.sock")
+
+        probe(ContainerSandbox(runtime.command), spec)
+
+        assert runtime.calls
+        for call in runtime.calls:
+            names = {name.upper() for name in call["environment"]}
+            assert not names & {"DATABASE_URL", "AGENTHUB_ANTHROPIC_API_KEY", "METRICS_TOKEN"}
+            # Which daemon to use still gets through.
+            assert "DOCKER_HOST" in names
 
     def test_nothing_starts_before_the_arguments_are_checked(
         self, runtime: FakeRuntime, spec: Any, monkeypatch: pytest.MonkeyPatch

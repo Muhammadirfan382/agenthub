@@ -12,6 +12,7 @@ from app.db.models.execution import (
 )
 from app.db.models.identity import Membership, Organization, Session, User
 from app.db.models.registry import AgentVersion, Installation
+from app.db.models.runtime_worker import RuntimeWorker
 from app.db.models.usage import ModelUsage
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "Membership",
     "ModelUsage",
     "Organization",
+    "RuntimeWorker",
     "Session",
     "User",
 ]

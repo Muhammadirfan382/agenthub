@@ -20,7 +20,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 API_V1_PREFIX = "/api/v1"
 SERVICE_NAME = "agenthub-backend"
-SERVICE_VERSION = "0.9.0"
+SERVICE_VERSION = "0.10.0"
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     #: Optional operator webhook for new alerts: an https URL on a public host.
     #: It is sent alert metadata only, never run content.
     alert_webhook_url: str = ""
+    #: The standalone worker's own /metrics endpoint (0 = off). The worker is a
+    #: separate process in production and counts most of what matters.
+    worker_metrics_port: int = Field(default=0, ge=0, le=65535)
+    #: Where it listens. Keep it on an address only the scraper can reach.
+    worker_metrics_host: str = "127.0.0.1"
 
     # --- Egress (Phase 8) ----------------------------------------------------
     #: Let `api_request` actually run: HTTPS GET to the agent's allowed domains

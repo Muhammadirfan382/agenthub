@@ -5,7 +5,9 @@
 #
 #   rule_files: ["prometheus-rules.yml"]
 #
-# and scrape the backend as job "agenthub". Thresholds are starting points:
+# and scrape the API as job "agenthub" and the runtime worker as job
+# "agenthub-worker" (infrastructure/deployment/prometheus.yml does both;
+# metrics are per process). Thresholds are starting points:
 # tune them to your traffic. Every metric used here is defined in
 # backend/app/observability/metrics.py.
 #
@@ -16,12 +18,12 @@ groups:
   - name: agenthub.availability
     rules:
       - alert: AgentHubDown
-        expr: up{job="agenthub"} == 0
+        expr: up{job=~"agenthub|agenthub-worker"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "The AgentHub backend is not answering scrapes."
+          summary: "An AgentHub process ({{ $labels.job }}) is not answering scrapes."
           runbook: "docs/MONITORING.md#agenthubdown"
 
       - alert: AgentHubHighErrorRate

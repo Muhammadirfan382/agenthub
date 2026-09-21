@@ -1,0 +1,33 @@
+# Prometheus for one AgentHub host. Loaded by compose.yml.
+#
+# Two targets, because metrics are per process: the API (in its container)
+# and the runtime worker (on the host, listening on the outbound network's
+# gateway). Both require the same bearer token, read from a secret file.
+#
+# No Alertmanager is configured: rules are evaluated and visible in the
+# Prometheus UI, and AgentHub's own alerts (with the optional webhook) cover
+# notification. Add an `alerting:` block to route these rules to a pager.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: agenthub
+    metrics_path: /api/v1/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_token
+    static_configs:
+      - targets: ["backend:8000"]
+
+  - job_name: agenthub-worker
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/metrics_token
+    static_configs:
+      - targets: ["172.30.2.1:9464"]

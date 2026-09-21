@@ -342,22 +342,28 @@ See [docs/MONITORING.md](docs/MONITORING.md).
 
 ### Current implementation
 
-- Local development only (Vite dev server and Uvicorn on loopback).
-- GitHub Actions CI (`.github/workflows/ci.yml`): frontend install, lint, type check,
-  test and build; backend install, lint, format check, type check and test. No
-  deployment.
-- `infrastructure/` subdirectories are empty placeholders. No Dockerfiles or Compose
-  files yet.
+Written and statically checked, **not yet run**. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+- Images: `agenthub-backend` (API, migrations, worker code), `agenthub-web`
+  (Caddy with the built SPA), `agenthub-sandbox`
+  (`infrastructure/docker/`, `agents/sandbox/`).
+- One Debian 13 host per environment (staging, production), running
+  `infrastructure/deployment/compose.yml`: web, backend, optional PostgreSQL,
+  Prometheus. All read-only, non-root, capability-free, with an internal
+  service network.
+- The runtime worker on the host (systemd), not in a container, driving a
+  rootless Docker daemon owned by a separate account. It reports its
+  capabilities to the API through `runtime_workers` and serves its own metrics.
+- CI builds, scans, load-tests and publishes images by digest with provenance.
+  The Deploy workflow promotes staging, then production behind approval. The
+  host's deploy script backs up, migrates, health-checks and rolls back.
 
 ### Planned architecture
 
-- Docker images for the backend and frontend, and Compose for local multi-service
-  development (introduced when PostgreSQL arrives).
-- Separate development, staging and production environments with configuration
-  entirely from the environment and a secret manager.
-- CD with image scanning, migrations and rollback (Phase 10).
-- Frontend served from a static host/CDN with security headers; backend and runtime
-  on a container platform with private networking to data stores.
+- Provenance verified at deploy time; host egress rules for the API container.
+- Several hosts behind a load balancer once rate limits move to a shared store.
+- A managed PostgreSQL with point-in-time recovery as the default.
 
 ---
 

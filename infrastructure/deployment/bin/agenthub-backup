@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Dumps the AgentHub database to a timestamped, checksummed file.
+#
+#   agenthub-backup                     (daily by agenthub-backup.timer, and
+#                                        before every deploy)
+#
+# pg_dump runs in a pinned PostgreSQL image on the compose outbound network,
+# so it works for the bundled database and a managed one alike, and its
+# version always matches the server's major version. Credentials reach it as
+# an environment file, never as arguments.
+#
+# Overridable (CI uses these): AGENTHUB_DATABASE_URL_FILE, AGENTHUB_BACKUP_DIR,
+# AGENTHUB_BACKUP_KEEP_DAYS, AGENTHUB_DB_NETWORK.
+#
+# Optional /etc/agenthub/backup.conf may set AGENTHUB_BACKUP_UPLOAD to an
+# executable that is given the dump's path, e.g. to copy it off the host
+# (restic, rclone, a bucket CLI). Without it, backups stay on this host only,
+# which does not survive losing the host: see docs/DEPLOYMENT.md.
+
+# shellcheck source=lib.sh
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+
+if [[ -r "$AGENTHUB_CONFIG_DIR/backup.conf" ]]; then
+  # shellcheck source=/dev/null
+  source "$AGENTHUB_CONFIG_DIR/backup.conf"
+fi
+
+URL_FILE="${AGENTHUB_DATABASE_URL_FILE:-$AGENTHUB_CONFIG_DIR/secrets/database_url}"
+BACKUP_DIR="${AGENTHUB_BACKUP_DIR:-/var/backups/agenthub}"
+KEEP_DAYS="${AGENTHUB_BACKUP_KEEP_DAYS:-14}"
+[[ "$KEEP_DAYS" =~ ^[0-9]+$ ]] || die "AGENTHUB_BACKUP_KEEP_DAYS must be a number"
+
+mkdir -p "$BACKUP_DIR"
+chmod 0700 "$BACKUP_DIR"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+write_pg_env "$URL_FILE" "$work/pg.env"
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+target="$BACKUP_DIR/agenthub-$stamp.dump"
+
+log "dumping the database to $target"
+docker run --rm \
+  --network "$AGENTHUB_DB_NETWORK" \
+  --env-file "$work/pg.env" \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  --user 70:70 \
+  "$POSTGRES_TOOLS_IMAGE" \
+  pg_dump --format=custom --no-owner --no-privileges >"$target.partial"
+mv "$target.partial" "$target"
+(cd "$BACKUP_DIR" && sha256sum "$(basename "$target")" >"$(basename "$target").sha256")
+log "wrote $(du -h "$target" | cut -f1) and its checksum"
+
+if [[ -n "${AGENTHUB_BACKUP_UPLOAD:-}" ]]; then
+  [[ -x "$AGENTHUB_BACKUP_UPLOAD" ]] || die "AGENTHUB_BACKUP_UPLOAD is not executable"
+  log "copying the dump off the host"
+  "$AGENTHUB_BACKUP_UPLOAD" "$target"
+fi
+
+# Retention: local copies older than KEEP_DAYS are removed; the newest dump is
+# always kept, however old.
+newest=$(basename "$target")
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'agenthub-*.dump*' -mtime "+$KEEP_DAYS" \
+  ! -name "$newest" ! -name "$newest.sha256" -print -delete | while read -r removed; do
+  log "removed expired backup $removed"
+done
+
+printf '%s\n' "$target"

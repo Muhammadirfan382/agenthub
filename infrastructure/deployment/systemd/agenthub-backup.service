@@ -1,0 +1,11 @@
+# Daily database backup. Installed by setup-host.sh.
+[Unit]
+Description=AgentHub database backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agenthub/bin/agenthub-backup
+Nice=10
+IOSchedulingClass=idle

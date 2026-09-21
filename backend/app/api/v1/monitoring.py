@@ -31,7 +31,8 @@ from app.db.session import SessionDep
 from app.llm.gateway import get_gateway
 from app.observability import alerts as alert_rules
 from app.observability.metrics import REGISTRY
-from app.runtime.sandbox import get_sandbox
+from app.observability.worker_metrics import authorized
+from app.runtime import workers
 from app.runtime.worker import STALE_CLAIM_SECONDS
 from app.schemas.common import CamelModel
 from app.security import audit
@@ -120,14 +121,18 @@ async def metrics(
     if not settings.metrics_enabled:
         raise NotFoundError("Metrics are not enabled.")
     expected = settings.metrics_token
-    if expected is not None:
-        supplied = (authorization_header or "").removeprefix("Bearer ").strip()
-        if supplied != expected.get_secret_value():
-            raise ForbiddenError("A valid metrics token is required.")
+    if not authorized(authorization_header, expected.get_secret_value() if expected else None):
+        raise ForbiddenError("A valid metrics token is required.")
     return Response(content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
-def _worker_state(latest_heartbeat: datetime | None, queued: int) -> tuple[ComponentState, str]:
+def _worker_state(
+    latest_heartbeat: datetime | None, queued: int, worker_seen_at: datetime | None = None
+) -> tuple[ComponentState, str]:
+    if worker_seen_at is not None:
+        # A worker reported in recently (see app/runtime/workers.py).
+        waiting = f" {queued} runs are waiting." if queued else ""
+        return "operational", "A worker is running and reporting." + waiting
     if latest_heartbeat is not None:
         age = (now_utc() - ensure_utc(latest_heartbeat)).total_seconds()
         if age <= STALE_CLAIM_SECONDS:
@@ -165,11 +170,13 @@ async def system_status(session: SessionDep, auth: AuthDep, settings: SettingsDe
             Execution.organization_id == auth.organization_id
         )
     )
-    worker_state, worker_detail = _worker_state(latest_heartbeat, queued)
-
     gateway = get_gateway(settings)
-    live_tiers = [tier for tier in gateway.all_routes() if gateway.available_for(tier)]
-    sandbox_available = await get_sandbox(settings).available()
+    # In production the worker, not this process, holds provider keys and the
+    # container runtime: ask what the runtime as a whole can do.
+    runtime = await workers.capabilities(session, settings)
+    worker_state, worker_detail = _worker_state(latest_heartbeat, queued, runtime.worker_seen_at)
+    live_tiers = [tier for tier in gateway.all_routes() if tier in runtime.live_tiers]
+    sandbox_available = runtime.sandbox_available
     firing = int(
         await session.scalar(
             select(func.count(Alert.id)).where(

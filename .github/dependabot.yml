@@ -18,3 +18,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # Base images, pinned by digest in the Dockerfiles.
+  - package-ecosystem: docker
+    directories:
+      - /infrastructure/docker
+      - /agents/sandbox
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The PostgreSQL and Prometheus images pinned in the compose file.
+  - package-ecosystem: docker-compose
+    directory: /infrastructure/deployment
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -1,0 +1,225 @@
+name: Deploy
+
+# Promotes a release that CI built, scanned, load-tested and attested:
+#   main passes CI  ->  staging (automatic)  ->  production (after approval)
+#
+# The same image digests go to both environments; nothing is rebuilt here.
+# Each host's deploy script migrates, health-checks, smoke-tests and rolls
+# back on its own if the new release fails (docs/DEPLOYMENT.md).
+#
+# Required per GitHub environment (`staging`, `production`):
+#   secrets  DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS
+#   vars     AGENTHUB_URL (https://...)
+# Configure `production` with required reviewers: that approval is the gate.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Environment
+        type: choice
+        options: [staging, production]
+        required: true
+      action:
+        description: What to do
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+        required: true
+      ci_run_id:
+        description: Id of the CI run on main whose release to deploy (required for deploy)
+        required: false
+
+permissions: {}
+
+jobs:
+  release:
+    name: Resolve the release
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+       && github.event.workflow_run.event == 'push')
+      || (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      backend: ${{ steps.read.outputs.backend }}
+      web: ${{ steps.read.outputs.web }}
+      sandbox: ${{ steps.read.outputs.sandbox }}
+      revision: ${{ steps.read.outputs.revision }}
+    steps:
+      - name: Choose the CI run
+        id: run
+        env:
+          EVENT: ${{ github.event_name }}
+          TRIGGER_RUN: ${{ github.event.workflow_run.id }}
+          INPUT_RUN: ${{ inputs.ci_run_id }}
+        run: |
+          if [ "$EVENT" = workflow_run ]; then run_id="$TRIGGER_RUN"; else run_id="$INPUT_RUN"; fi
+          case "$run_id" in
+            ''|*[!0-9]*) echo "A numeric CI run id is required." >&2; exit 1 ;;
+          esac
+          echo "id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the release record
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+
+      # Only digest references under this repository owner's registry path
+      # are passed on; the host checks the same thing again.
+      - name: Read and validate it
+        id: read
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          prefix="ghcr.io/${OWNER,,}/agenthub-"
+          for name in backend web sandbox; do
+            reference="$(jq -r --arg name "$name" '.[$name]' release.json)"
+            if ! printf '%s' "$reference" | grep -Eq "^${prefix//./\\.}${name}@sha256:[a-f0-9]{64}$"; then
+              echo "Refusing $name reference: $reference" >&2
+              exit 1
+            fi
+            echo "$name=$reference" >> "$GITHUB_OUTPUT"
+          done
+          revision="$(jq -r '.revision' release.json)"
+          printf '%s' "$revision" | grep -Eq '^[a-f0-9]{40}$' || { echo "Bad revision" >&2; exit 1; }
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+  staging:
+    name: Deploy to staging
+    needs: release
+    if: github.event_name == 'workflow_run' || inputs.target == 'staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    environment:
+      name: staging
+      url: ${{ vars.AGENTHUB_URL }}
+    steps:
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          BACKEND: ${{ needs.release.outputs.backend }}
+          WEB: ${{ needs.release.outputs.web }}
+          SANDBOX: ${{ needs.release.outputs.sandbox }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 0600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          # The key is bound to the deploy script by a forced command on the
+          # host; this only chooses what it deploys.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy --backend $BACKEND --web $WEB --sandbox $SANDBOX"
+
+      - name: Check it from outside
+        env:
+          AGENTHUB_URL: ${{ vars.AGENTHUB_URL }}
+        run: |
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$AGENTHUB_URL/api/v1/health/ready"
+          curl -fsS "$AGENTHUB_URL/" | grep -q '<div id="root">'
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  production:
+    name: Deploy to production
+    needs: [release, staging]
+    # After staging succeeded in this run, or when production is chosen by hand.
+    if: >-
+      !cancelled() && needs.release.result == 'success'
+      && (needs.staging.result == 'success'
+          || (github.event_name == 'workflow_dispatch' && inputs.target == 'production'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: ${{ vars.AGENTHUB_URL }}
+    steps:
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          BACKEND: ${{ needs.release.outputs.backend }}
+          WEB: ${{ needs.release.outputs.web }}
+          SANDBOX: ${{ needs.release.outputs.sandbox }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 0600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          # The key is bound to the deploy script by a forced command on the
+          # host; this only chooses what it deploys.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy --backend $BACKEND --web $WEB --sandbox $SANDBOX"
+
+      - name: Check it from outside
+        env:
+          AGENTHUB_URL: ${{ vars.AGENTHUB_URL }}
+        run: |
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$AGENTHUB_URL/api/v1/health/ready"
+          curl -fsS "$AGENTHUB_URL/" | grep -q '<div id="root">'
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  rollback:
+    name: Roll back ${{ inputs.target }}
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'rollback'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-${{ inputs.target }}
+      cancel-in-progress: false
+    environment:
+      name: ${{ inputs.target }}
+      url: ${{ vars.AGENTHUB_URL }}
+    steps:
+      - name: Roll back to the previous release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 0600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" rollback
+
+      - name: Check it from outside
+        env:
+          AGENTHUB_URL: ${{ vars.AGENTHUB_URL }}
+        run: |
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$AGENTHUB_URL/api/v1/health/ready"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

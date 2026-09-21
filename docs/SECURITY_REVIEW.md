@@ -45,3 +45,22 @@ important: prompt injection is **contained**, not prevented - a hijacked agent
 cannot act beyond its grants, but can still be misled; live injection
 evaluations against real models have not been run; allowed domains are trusted
 completely; rate limits are per process.
+
+## Phase 10 review (deployment)
+
+Date: 2026-09-21. Same caveat: by the authors, not independent. Scope: what
+changes when AgentHub runs as separate processes behind a reverse proxy on a
+real host.
+
+| # | Finding | Severity | Status |
+| --- | --- | --- | --- |
+| 10 | Behind a reverse proxy, `request.client.host` is the proxy for everyone: all anonymous clients would share one sign-in limiter key, so **20 failed sign-ins from anyone would lock out every anonymous sign-in** (and share the write limit). | High (in deployment) | **Fixed in configuration**: uvicorn honours `X-Forwarded-For` only from Caddy's fixed address (`--proxy-headers`, `FORWARDED_ALLOW_IPS`), and Caddy ignores incoming forwarded headers. Not exercised on a host. |
+| 11 | The sandbox runner started the container CLI with the worker's **entire environment**, including the database URL and provider keys. The containers never saw them, but any CLI plugin or wrapper could. | Medium | **Fixed**: an allow-list of variables (`RUNTIME_ENVIRONMENT`); `test_sandbox_runner.py`. |
+| 12 | The metrics token was compared with `!=`, which is not constant-time. | Low | **Fixed**: `hmac.compare_digest`, shared by the API and worker endpoints; `test_runtime_workers.py`. |
+| 13 | Split into processes, the API would have reported providers "not configured" and the sandbox "unavailable" (it holds neither), and the worker's metrics (runs, models, egress, sandbox, alerts) would not have been served anywhere. | Medium (misleading status, blind monitoring) | **Fixed**: workers report capabilities (`runtime_workers`); the worker serves its own token-protected `/metrics`; `test_runtime_workers.py`. |
+| 14 | A default edge access log would record every visitor's IP address. | Low | **Avoided**: no access log in the Caddyfile. |
+
+The deployment's own controls (non-root read-only containers, no socket,
+rootless sandbox under a separate account, digest-only forced-command CD) are
+listed with their evidence in [SECURITY_SIGNOFF.md](SECURITY_SIGNOFF.md),
+together with what blocks production.

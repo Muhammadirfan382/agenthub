@@ -1,0 +1,79 @@
+# The AgentHub runtime worker, on the host.
+#
+# Installed to /etc/systemd/system/ by infrastructure/deployment/host/setup-host.sh.
+# The code under /opt/agenthub/worker/current is copied out of the backend image
+# the deploy script just rolled out, so the worker always runs the same digest
+# as the API.
+#
+# Why on the host: the worker starts sandbox containers, and no container may
+# be handed a container runtime socket. It talks to a *rootless* Docker daemon
+# owned by a separate account (agenthub-sandbox), so a container that escaped
+# its sandbox would land as that unprivileged account - which cannot read this
+# worker's secrets.
+
+[Unit]
+Description=AgentHub runtime worker
+Documentation=file:///opt/agenthub/docs/DEPLOYMENT.md
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=agenthub
+Group=agenthub
+# The rootless daemon's socket group. Its secrets (/etc/agenthub/worker/secrets)
+# are readable through its own group; it is deliberately NOT in the group the
+# API container's secrets are shared with, and the API cannot read its secrets.
+SupplementaryGroups=agenthub-sandbox
+
+EnvironmentFile=/etc/agenthub/worker.env
+# Written per release by the deploy script: SANDBOX_IMAGE, by digest.
+EnvironmentFile=/opt/agenthub/worker/current/release.env
+Environment=HOME=/var/lib/agenthub-worker
+Environment=DOCKER_CONFIG=/var/lib/agenthub-worker/docker
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+WorkingDirectory=/opt/agenthub/worker/current/backend
+ExecStart=/opt/agenthub/worker/current/venv/bin/python -m app.runtime.worker
+
+# Runs are durable: a stopped worker's claims go stale and are resumed by the
+# next one from the step they reached, so a plain stop is safe.
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# --- Hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+StateDirectory=agenthub-worker
+StateDirectoryMode=0700
+# The rootless daemon's socket. Connecting to it is the only thing the worker
+# does outside its own state directory.
+ReadWritePaths=/srv/agenthub-sandbox/run
+
+[Install]
+WantedBy=multi-user.target

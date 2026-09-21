@@ -95,6 +95,14 @@ variable is available unless it has been deliberately granted.
   answers, fetched content, credentials or personal data. Log through the
   standard logger so the redacting formatter applies, and do not rely on
   redaction: do not log those things in the first place.
+- Deployment lives in `infrastructure/` and `.github/workflows/deploy.yml`.
+  Images are referenced by digest, never by tag. Every compose service stays
+  read-only, non-root, with all capabilities dropped and no-new-privileges.
+  Never give any container a runtime socket: the worker runs on the host
+  against the rootless sandbox daemon. The CD key may only run
+  `agenthub-deploy --ssh`, which accepts only digests. A migration must work
+  with the release before it (expand, then contract): rollback never
+  downgrades the database.
 
 ## 4. Dependencies
 
@@ -112,11 +120,11 @@ variable is available unless it has been deliberately granted.
 frontend/        React + TypeScript + Vite (strict TS, ESLint, Vitest)
 backend/         Python FastAPI service (Pydantic settings, pytest, ruff, mypy)
 agents/          Agent runtime, sandbox, tools and policies (sandbox image since Phase 6)
-database/        Future migrations and schema (empty in Phase 0)
-infrastructure/  Future Docker, Compose and deployment config (empty in Phase 0)
-scripts/         Developer scripts (empty in Phase 0)
-docs/            Roadmap and design documents
-tests/           Future cross-service integration / end-to-end tests
+database/        Alembic migrations
+infrastructure/  Dockerfiles, the production compose stack, host scripts and units, monitoring rules
+scripts/         Developer scripts (empty so far)
+docs/            Roadmap, design, deployment, operations and security documents
+tests/           Cross-service tests: the k6 load test (tests/load)
 ```
 
 Empty directories hold a `.gitkeep` until real content arrives.

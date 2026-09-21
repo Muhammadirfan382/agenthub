@@ -100,6 +100,9 @@ A blank key is the same as no key. Routes are validated when settings load.
 | `ALERT_POLICY_DENIALS` | `10` | Policy refusals, or blocked outbound requests, in 15 minutes that fire an alert. |
 | `ALERT_STALLED_RUN_SECONDS` | `300` | Silence from a claimed run before it counts as stalled. |
 | `ALERT_WEBHOOK_URL` | empty | HTTPS only. New alerts are POSTed here through the egress gateway, metadata only. |
+| `WORKER_METRICS_PORT` | `0` | The standalone worker's own `/metrics` (0 = off). Same token as the API's. |
+| `WORKER_METRICS_HOST` | `127.0.0.1` | Where it listens. In the compose deployment, the outbound network's gateway (`172.30.2.1`). |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Read by uvicorn, not by AgentHub: the only addresses whose `X-Forwarded-For` is believed. Set to the reverse proxy's fixed address. |
 
 **No ambient credentials.** Only the `AGENTHUB_`-prefixed key variables are read:
 a plain `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` set machine-wide for other tools
@@ -659,6 +662,12 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   said about its own isolation, null for runs that never had one; `mode`,
   `model_route`, `input_text`, `cost_microusd` and `conversation` for
   model-driven runs.
+- **Runtime workers:** `runtime_workers`, one row per worker process: version,
+  when it started and last reported, whether its container runtime answers,
+  and which providers and tiers it can use. The API reads recent rows for
+  status, sandbox and model screens, because in production the worker holds the
+  runtime and the keys and the API holds neither. Platform-wide, capabilities
+  only, never credentials. The worker host name is never returned.
 - **Alerts:** `alerts`, one row per rule per organization while it fires,
   with severity, summary, a counts-only detail document, first and last seen,
   occurrences, whether the webhook was told, and when it resolved.
@@ -766,6 +775,13 @@ replaced resolver and a recording transport (`test_egress.py`), the policy
 engine and untrusted-content wrapper as pure functions (`test_policy.py`), and
 the audit log, headers, write limit and secrets directory through the API
 (`test_security_layer.py`).
+
+The split deployment is tested in `test_runtime_workers.py`: a reporting
+worker's capabilities show in status, models and sandbox, a quiet worker stops
+counting, host names never leak, keys are never recorded, and the worker's
+metrics endpoint enforces its token and survives a taken port.
+`test_sandbox_runner.py` asserts the container CLI never receives the worker's
+secrets.
 
 Monitoring is tested through the API and as units (`test_observability.py`,
 `test_alerts_and_insights.py`): redaction by shape and by name, log lines with

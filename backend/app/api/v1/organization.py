@@ -17,6 +17,7 @@ from app.db.models import ModelUsage, Organization
 from app.db.session import SessionDep
 from app.llm.gateway import get_gateway, start_of_day
 from app.llm.routing import PROVIDERS
+from app.runtime import workers
 from app.runtime.sandbox import get_sandbox
 from app.sandbox import build_spec
 from app.schemas.execution import (
@@ -84,16 +85,24 @@ def _sandbox_status(settings: Settings, *, available: bool, detail: str) -> dict
 
 
 @router.get("/sandbox", response_model=SandboxStatus, summary="Sandbox configuration")
-async def get_sandbox_status(auth: AuthDep, settings: SettingsDep) -> SandboxStatus:
+async def get_sandbox_status(
+    session: SessionDep, auth: AuthDep, settings: SettingsDep
+) -> SandboxStatus:
     """Reports the configuration and whether a runtime answers. Starts nothing."""
     authorization.require(auth.role, "execution:read")
-    sandbox = get_sandbox(settings)
-    available = await sandbox.available()
-    detail = (
-        "A container runtime is available."
-        if available
-        else f"`{settings.sandbox_command}` is not available, so runs are recorded, not isolated."
-    )
+    local = await get_sandbox(settings).available()
+    # The worker may have a runtime this process does not (production).
+    available = local or (await workers.capabilities(session, settings)).sandbox_available
+    if local:
+        detail = "A container runtime is available."
+    elif available:
+        detail = (
+            "The worker has a container runtime and checks each run's sandbox before it starts."
+        )
+    else:
+        detail = (
+            f"`{settings.sandbox_command}` is not available, so runs are recorded, not isolated."
+        )
     return SandboxStatus.model_validate(
         _sandbox_status(settings, available=available, detail=detail)
     )
@@ -157,7 +166,9 @@ async def get_model_status(
     tokens = await gateway.tokens_used_today(session, auth.organization_id)
     cost = await gateway.cost_today(session, auth.organization_id)
     routes = gateway.all_routes()
-    any_available = any(gateway.available_for(tier) for tier in routes)
+    # Provider keys live with the worker in production; count what it reports.
+    runtime = await workers.capabilities(session, settings)
+    any_available = any(tier in runtime.live_tiers for tier in routes)
     if not settings.models_enabled:
         detail = "The model gateway is switched off (MODELS_ENABLED=false). Runs are simulated."
     elif any_available:
@@ -168,14 +179,14 @@ async def get_model_status(
         {
             "enabled": settings.models_enabled,
             "providers": [
-                {"name": name, "configured": gateway.configured(name)} for name in PROVIDERS
+                {"name": name, "configured": name in runtime.providers} for name in PROVIDERS
             ],
             "routes": [
                 {
                     "tier": tier,
                     "provider": route.provider,
                     "model": route.model,
-                    "available": gateway.available_for(tier),
+                    "available": tier in runtime.live_tiers,
                 }
                 for tier, route in routes.items()
             ],

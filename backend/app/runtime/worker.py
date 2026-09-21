@@ -15,6 +15,7 @@ import os
 import socket
 import time
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,6 +33,8 @@ from app.observability.metrics import (
     record_build,
 )
 from app.observability.tracing import configure_tracing
+from app.observability.worker_metrics import serve as serve_metrics
+from app.runtime import workers
 from app.runtime.engine import run_to_completion, stale_before
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,8 @@ POLL_SECONDS = 1.0
 HEARTBEAT_SECONDS = 15.0
 #: Claims a run may take. A run that keeps killing its worker is failed, not retried forever.
 MAX_ATTEMPTS = 3
+#: How often a worker tells the API what it can do (see app/runtime/workers.py).
+REPORT_SECONDS = 60.0
 
 
 def worker_name() -> str:
@@ -197,7 +202,9 @@ async def work_loop(
 ) -> None:
     resolved = settings or get_settings()
     logger.info("runtime worker started", extra={"worker": worker})
+    started_at = now_utc()
     next_watch = 0.0
+    next_report = 0.0
     while not stop.is_set():
         try:
             did_work = await run_once(session_factory, worker=worker, settings=settings)
@@ -211,10 +218,32 @@ async def work_loop(
             next_watch = time.monotonic() + resolved.alert_interval_seconds
             await watch(session_factory, resolved)
 
+        if time.monotonic() >= next_report:
+            next_report = time.monotonic() + REPORT_SECONDS
+            await report_capabilities(
+                session_factory, resolved, worker=worker, started_at=started_at
+            )
+
         if not did_work:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
     logger.info("runtime worker stopped", extra={"worker": worker})
+
+
+async def report_capabilities(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    worker: str,
+    started_at: datetime,
+) -> None:
+    """Records what this worker can do, for the API to read. Never raises."""
+    try:
+        async with session_factory() as session:
+            await workers.report(session, settings, worker=worker, started_at=started_at)
+            await session.commit()
+    except Exception:
+        logger.exception("could not report worker capabilities")
 
 
 async def watch(session_factory: async_sessionmaker[AsyncSession], settings: Settings) -> None:
@@ -258,6 +287,7 @@ async def main(settings: Settings | None = None) -> None:
     # build metric, or its spans would be no-ops and its logs uncorrelated.
     configure_tracing(resolved)
     record_build(SERVICE_VERSION, resolved.environment)
+    metrics_server = serve_metrics(resolved)
     engine = create_engine(resolved)
     stop = asyncio.Event()
     try:
@@ -265,6 +295,8 @@ async def main(settings: Settings | None = None) -> None:
             create_session_factory(engine), worker=worker_name(), stop=stop, settings=resolved
         )
     finally:
+        if metrics_server is not None:
+            metrics_server.shutdown()
         await engine.dispose()
 
 

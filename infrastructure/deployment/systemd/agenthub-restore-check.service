@@ -1,0 +1,11 @@
+# Weekly proof that the newest backup restores. Installed by setup-host.sh.
+# A failure here means the backups cannot be trusted: treat it as an incident.
+[Unit]
+Description=AgentHub backup restore check
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agenthub/bin/agenthub-restore-check
+Nice=10

@@ -1,0 +1,220 @@
+# AgentHub on one Linux host: staging and production are this same file on two
+# hosts, with different configuration. See docs/DEPLOYMENT.md.
+#
+#   docker compose --env-file /etc/agenthub/release.env \
+#                  --env-file /etc/agenthub/agenthub.env up -d --wait
+#
+# Normally run by /opt/agenthub/bin/agenthub-deploy, never by hand on a live
+# host. Images are always referenced by digest (release.env), never by tag.
+#
+# What is deliberately NOT here: the runtime worker. It drives a rootless
+# container runtime for the sandbox, and nothing in this file may be given a
+# container runtime socket. It runs on the host under systemd
+# (infrastructure/deployment/systemd/agenthub-worker.service).
+#
+# Every service: read-only root filesystem, no capabilities, no privilege
+# escalation, a fixed unprivileged user, bounded memory, processes and logs.
+
+name: agenthub
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  init: true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  web:
+    <<: *hardening
+    image: ${AGENTHUB_WEB_IMAGE:?set by release.env}
+    user: "10002:10002"
+    environment:
+      AGENTHUB_SITE: ${AGENTHUB_SITE:?set in agenthub.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set in agenthub.env}
+    ports:
+      - "80:8080"
+      - "443:8443"
+      - "443:8443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    networks:
+      edge: {}
+      app:
+        # Fixed: the backend trusts X-Forwarded-For from this address only.
+        ipv4_address: 172.30.1.10
+    mem_limit: 256m
+    pids_limit: 256
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    <<: *hardening
+    image: ${AGENTHUB_BACKEND_IMAGE:?set by release.env}
+    user: "10001:10001"
+    env_file:
+      - ${AGENTHUB_CONFIG_DIR:-/etc/agenthub}/backend.env
+    environment:
+      ENVIRONMENT: production
+      SECRETS_DIR: /run/secrets
+      # The worker runs on the host; this process only answers requests.
+      RUNTIME_WORKER_ENABLED: "false"
+      FORWARDED_ALLOW_IPS: 172.30.1.10
+    # Only what the API needs: no provider keys (the worker holds those).
+    secrets:
+      - database_url
+      - metrics_token
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    networks:
+      app: {}
+      # Reaches a managed PostgreSQL. With the bundled database this route is
+      # unused; restrict it further with host egress rules (docs/DEPLOYMENT.md).
+      outbound: {}
+    expose:
+      - "8000"
+    mem_limit: 768m
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=4).status != 200)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  # One-shot: `docker compose run --rm migrate`. The deploy script runs it
+  # before starting a new release. Migrations must be backward compatible
+  # with the release before them (expand, then contract), so a rollback never
+  # needs a downgrade.
+  migrate:
+    <<: *hardening
+    image: ${AGENTHUB_BACKEND_IMAGE:?set by release.env}
+    user: "10001:10001"
+    restart: "no"
+    profiles: [migrate]
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    env_file:
+      - ${AGENTHUB_CONFIG_DIR:-/etc/agenthub}/backend.env
+    environment:
+      ENVIRONMENT: production
+      SECRETS_DIR: /run/secrets
+    secrets:
+      - database_url
+      - metrics_token
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    networks: [app, outbound]
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  # Only with COMPOSE_PROFILES=bundled-db. A managed PostgreSQL (with its own
+  # backups, failover and patching) is the recommended production choice.
+  postgres:
+    <<: *hardening
+    image: postgres:17.11-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+    profiles: [bundled-db]
+    # The image's own postgres account; running as it means the entrypoint
+    # needs no capabilities to change users or ownership.
+    user: "70:70"
+    group_add: ["10001"]
+    environment:
+      POSTGRES_USER: agenthub
+      POSTGRES_DB: agenthub
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+      - /var/run/postgresql:size=1m,noexec,nosuid,nodev,uid=70,gid=70
+    networks: [app, outbound]
+    # Loopback only: for the host-installed worker and backups.
+    ports:
+      - "127.0.0.1:5432:5432"
+    shm_size: 128m
+    mem_limit: 1g
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthub -d agenthub"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  prometheus:
+    <<: *hardening
+    image: prom/prometheus:v3.13.0@sha256:c6b27ea434f8389bfe233fbc7be381cf50587c286e871bc842008f5a1b1908a7
+    user: "65534:65534"
+    group_add: ["10001"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.listen-address=0.0.0.0:9090
+    secrets:
+      - metrics_token
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus-rules.yml:/etc/prometheus/rules/agenthub.yml:ro
+      - prometheus-data:/prometheus
+    networks: [app, outbound]
+    # Loopback only: reach it through an SSH tunnel, never the internet.
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: 1g
+    pids_limit: 256
+
+secrets:
+  database_url:
+    file: ${AGENTHUB_CONFIG_DIR:-/etc/agenthub}/secrets/database_url
+  metrics_token:
+    file: ${AGENTHUB_CONFIG_DIR:-/etc/agenthub}/secrets/metrics_token
+  postgres_password:
+    file: ${AGENTHUB_CONFIG_DIR:-/etc/agenthub}/secrets/postgres_password
+
+networks:
+  # The public side: only the web container.
+  edge:
+    driver: bridge
+  # Service to service. No route out.
+  app:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+  # Outbound and loopback-published ports. Its gateway, 172.30.2.1, is the
+  # host as seen from here: the worker's metrics endpoint listens there.
+  outbound:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.2.0/24
+          gateway: 172.30.2.1
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  prometheus-data:

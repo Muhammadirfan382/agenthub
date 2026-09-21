@@ -5,13 +5,16 @@
 
 There is no public sign-up: accounts are created here, deliberately. The
 password is typed at a prompt, never passed as an argument, so it does not end
-up in shell history, process listings or logs.
+up in shell history, process listings or logs. For automation (a CI load-test
+account, a provisioning tool), `--password-stdin` reads it from standard input
+instead - still never from an argument.
 """
 
 import argparse
 import asyncio
 import getpass
 import sys
+from typing import TextIO
 
 from app.core.config import get_settings
 from app.core.errors import ApiError
@@ -32,7 +35,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--role", default="owner", choices=list(ROLES))
     parser.add_argument("--timezone", default="UTC")
+    parser.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="Read the password from the first line of standard input instead of prompting.",
+    )
     return parser.parse_args()
+
+
+def read_password(stream: TextIO) -> str:
+    """The first line of `stream`, without its line ending. Empty is refused."""
+    password = stream.readline().rstrip("\r\n")
+    if not password:
+        print("No password was given on standard input.", file=sys.stderr)
+        raise SystemExit(1)
+    return password
 
 
 def prompt_password() -> str:
@@ -89,7 +106,8 @@ async def run(args: argparse.Namespace, password: str) -> int:
 
 def main() -> int:
     args = parse_args()
-    return asyncio.run(run(args, prompt_password()))
+    password = read_password(sys.stdin) if args.password_stdin else prompt_password()
+    return asyncio.run(run(args, password))
 
 
 if __name__ == "__main__":

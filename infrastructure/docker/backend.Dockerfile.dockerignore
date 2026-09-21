@@ -1,0 +1,10 @@
+# An allow-list: nothing reaches the build unless named here. No .env files,
+# local databases, virtual environments, caches or git history.
+*
+!backend/requirements.txt
+!backend/alembic.ini
+!backend/app/
+!backend/scripts/create_user.py
+!database/migrations/
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Proves a backup can be restored, without touching the live database.
+#
+#   agenthub-restore-check [DUMP]     (default: the newest dump; weekly by
+#                                      agenthub-restore-check.timer)
+#
+# Verifies the checksum, restores the dump into a throwaway PostgreSQL
+# container with no network at all, and checks what came back: the schema
+# version, the core tables, and that organizations and accounts exist. The
+# container and its data are removed afterwards, pass or fail.
+#
+# Exit status 0 means the backup restored and looked like AgentHub. It does
+# not mean it is recent: check the dump's timestamp too.
+
+# shellcheck source=lib.sh
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+
+BACKUP_DIR="${AGENTHUB_BACKUP_DIR:-/var/backups/agenthub}"
+dump="${1:-}"
+if [[ -z "$dump" ]]; then
+  dump=$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'agenthub-*.dump' | sort | tail -n 1)
+  [[ -n "$dump" ]] || die "no backups in $BACKUP_DIR"
+fi
+[[ -r "$dump" ]] || die "cannot read $dump"
+[[ -r "$dump.sha256" ]] || die "no checksum next to $dump"
+
+log "checking $dump"
+(cd "$(dirname "$dump")" && sha256sum --check --strict --quiet "$(basename "$dump").sha256") ||
+  die "checksum mismatch: the dump is damaged"
+
+name="agenthub-restore-check-$$"
+work=$(mktemp -d)
+cleanup() {
+  docker rm --force --volumes "$name" >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
+# A throwaway password for a server nobody can reach: no network, removed after.
+python3 -c 'import secrets; print("POSTGRES_PASSWORD=" + secrets.token_urlsafe(24))' >"$work/pg.env"
+cp "$dump" "$work/backup.dump"
+chmod 0644 "$work/backup.dump"
+chmod 0755 "$work"
+
+docker run --detach --name "$name" \
+  --network none \
+  --env-file "$work/pg.env" \
+  --env POSTGRES_USER=agenthub --env POSTGRES_DB=agenthub \
+  --cap-drop ALL --security-opt no-new-privileges:true --user 70:70 \
+  --tmpfs /var/lib/postgresql/data:uid=70,gid=70 \
+  --tmpfs /var/run/postgresql:uid=70,gid=70 \
+  --volume "$work/backup.dump:/restore/backup.dump:ro" \
+  "$POSTGRES_TOOLS_IMAGE" >/dev/null
+
+for _ in $(seq 1 60); do
+  docker exec "$name" pg_isready -U agenthub -d agenthub -q && break
+  sleep 1
+done
+docker exec "$name" pg_isready -U agenthub -d agenthub -q || die "the throwaway server did not start"
+# The entrypoint restarts the server once after initialising; wait it out.
+sleep 3
+for _ in $(seq 1 30); do
+  docker exec "$name" pg_isready -U agenthub -d agenthub -q && break
+  sleep 1
+done
+
+log "restoring"
+docker exec "$name" pg_restore --exit-on-error --no-owner --no-privileges \
+  -U agenthub -d agenthub /restore/backup.dump || die "pg_restore failed"
+
+query() { docker exec "$name" psql -U agenthub -d agenthub -At -c "$1"; }
+
+version=$(query "SELECT version_num FROM alembic_version") || die "no schema version in the backup"
+tables=$(query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
+for table in organizations users memberships agents executions audit_events; do
+  query "SELECT 1 FROM $table LIMIT 1" >/dev/null || die "table $table is missing"
+done
+organizations=$(query "SELECT count(*) FROM organizations")
+users=$(query "SELECT count(*) FROM users")
+
+log "restored: schema $version, $tables tables, $organizations organizations, $users accounts"
+if [[ -n "${AGENTHUB_EXPECT_SCHEMA:-}" && "$version" != "$AGENTHUB_EXPECT_SCHEMA" ]]; then
+  die "expected schema $AGENTHUB_EXPECT_SCHEMA, found $version"
+fi
+[[ "$organizations" -gt 0 ]] || die "the backup has no organizations"
+log "restore check passed"

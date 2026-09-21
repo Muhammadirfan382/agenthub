@@ -1,0 +1,76 @@
+# The AgentHub edge: TLS, the built frontend, and /api proxied to the backend.
+#
+# Environment (set in compose):
+#   AGENTHUB_SITE  the site address: "agenthub.example.com" in production
+#                  (automatic HTTPS), "http://localhost" for the CI load test.
+#   ACME_EMAIL     contact address for the certificate authority.
+#
+# Caddy runs unprivileged inside its container and listens on 8080/8443; the
+# host publishes those as 80/443.
+
+{
+	# No admin API: configuration changes by redeploying, never at runtime.
+	admin off
+	http_port 8080
+	https_port 8443
+	# Caddy's own redirect would point at :8443; the block below redirects to
+	# the public https port instead.
+	auto_https disable_redirects
+	email {$ACME_EMAIL}
+}
+
+(static_headers) {
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()"
+		# The page's own policy is a <meta> tag from the build; frame-ancestors
+		# can only be sent as a header. Both apply: the stricter wins.
+		Content-Security-Policy "frame-ancestors 'none'"
+		-Server
+	}
+}
+
+{$AGENTHUB_SITE} {
+	encode zstd gzip
+
+	# Scraped by Prometheus over the internal network, never from outside.
+	@metrics path /api/v1/metrics /api/v1/metrics/*
+	respond @metrics 404
+
+	handle /api/* {
+		# The backend sets its own security headers on API responses.
+		reverse_proxy backend:8000 {
+			# Server-sent events (live run streams) must not be buffered.
+			flush_interval -1
+			# Caddy trusts no incoming X-Forwarded-* headers (no trusted_proxies)
+			# and sets X-Forwarded-For to the real client address. The backend
+			# trusts that header from this container's fixed address only.
+		}
+	}
+
+	handle {
+		import static_headers
+		root * /srv
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@pages not path /assets/*
+		header @pages Cache-Control "no-cache"
+		# Client-side routes all serve the app shell.
+		try_files {path} /index.html
+		file_server
+	}
+
+	# No access log on purpose: it would record every visitor's IP address,
+	# which is personal data. Request metrics and traces come from the backend.
+}
+
+# Every other plain-http request goes to https on the public port. More
+# specific http:// site addresses above (the CI load test) still win.
+http:// {
+	redir https://{host}{uri} 308
+}

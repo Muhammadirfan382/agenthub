@@ -1,0 +1,19 @@
+# CI only: the production compose file, served on http://localhost:8080 with
+# the bundled database, for the image smoke and load tests. Never on a host.
+#
+#   docker compose -f compose.yml -f compose.ci.yml ...
+#
+# Everything else - images, users, read-only filesystems, dropped capabilities,
+# networks, secrets as files - is exactly production's.
+
+services:
+  web:
+    environment:
+      AGENTHUB_SITE: http://localhost
+      ACME_EMAIL: ci@example.invalid
+    ports: !override
+      - "127.0.0.1:8080:8080"
+
+  prometheus:
+    ports: !override
+      - "127.0.0.1:9090:9090"

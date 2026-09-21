@@ -278,3 +278,41 @@ counters across several processes.
 - Managed PostgreSQL/Redis, backups and restore testing, secrets manager.
 - Operational runbooks, incident response, performance and load testing, final
   security sign-off.
+
+**Delivered:** release images for the backend, web and sandbox (non-root,
+pinned base images by digest, allow-list build contexts); a production compose
+stack for one Debian 13 host, with every service read-only, capability-free
+and non-root, an internal service network, Caddy with automatic HTTPS and no
+access log, optional bundled PostgreSQL, and Prometheus scraping both
+processes; the worker on the host under a hardened systemd unit, driving a
+rootless Docker daemon owned by a separate secret-less account, with its code
+copied out of the backend image so both run one digest; a deploy script that
+takes only digests, backs up, migrates, health-checks, smoke-tests and rolls
+back by itself; daily backups and weekly restore checks; a host setup script;
+CI that tests Python 3.13 (production's), validates every deployment file,
+builds, scans (Trivy), generates SBOMs, runs the production stack with a k6
+load test, tests backup and restore, and publishes with build provenance; a
+Deploy workflow promoting staging, then production behind approval; and
+[DEPLOYMENT.md](DEPLOYMENT.md), [OPERATIONS.md](OPERATIONS.md) (runbooks,
+incident response), [PERFORMANCE.md](PERFORMANCE.md) and
+[SECURITY_SIGNOFF.md](SECURITY_SIGNOFF.md). The split into processes also
+needed backend changes: workers report their capabilities to the API
+(`runtime_workers`, migration 0009), the worker serves its own metrics, the
+sandbox CLI gets an allow-listed environment, and `create_user` can take a
+password on stdin.
+
+**How it is verified:** locally, the backend suite (including the new worker,
+metrics and runner tests), the migration round trip, `bash -n` on every script
+and YAML parsing of every configuration file. Everything else is verified by
+CI jobs that have **not run yet**, because nothing has been pushed: the image
+builds and scans, the stack and load test, backup and restore on PostgreSQL,
+shellcheck, actionlint, `docker compose config`, `caddy validate` and
+`promtool`.
+
+**Deliberately not in this phase, or not done:** no host was prepared and
+nothing was deployed; the deploy, rollback and restore procedures have not
+been rehearsed; no load-test numbers exist; provenance is not verified at
+deploy time; Redis is not deployed (nothing uses it); there is no multi-host
+or failover setup. **Security sign-off was not given**: production is blocked
+on an independent review and the other items in
+[SECURITY_SIGNOFF.md](SECURITY_SIGNOFF.md).

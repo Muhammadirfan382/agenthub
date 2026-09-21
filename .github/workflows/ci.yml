@@ -97,9 +97,15 @@ jobs:
         run: npm run build
 
   backend:
-    name: Backend
+    name: Backend (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 is what production runs (the backend image and the Debian 13
+        # worker hosts); 3.14 is what development uses.
+        python: ['3.13', '3.14']
     defaults:
       run:
         working-directory: backend
@@ -112,7 +118,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.14'
+          python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
 
@@ -228,3 +234,347 @@ jobs:
       # still fails the job through the exit code.
       - name: Seed demonstration data
         run: python -m scripts.seed_demo > /dev/null
+
+      # The same scripts production runs daily and weekly, against this job's
+      # PostgreSQL: dump, verify the checksum, restore into a throwaway server
+      # with no network, and check the schema version and data came back.
+      - name: Back up and restore with the production scripts
+        env:
+          AGENTHUB_DB_NETWORK: ${{ job.services.postgres.network }}
+          AGENTHUB_BACKUP_DIR: ${{ runner.temp }}/backups
+          AGENTHUB_CONFIG_DIR: ${{ runner.temp }}/no-config
+        run: |
+          url_file="$RUNNER_TEMP/database_url"
+          printf '%s' 'postgresql+asyncpg://agenthub:ci_local_only@postgres:5432/agenthub' > "$url_file"
+          export AGENTHUB_DATABASE_URL_FILE="$url_file"
+          AGENTHUB_EXPECT_SCHEMA="$(python -m alembic heads | awk '{print $1}')"
+          export AGENTHUB_EXPECT_SCHEMA
+          ../infrastructure/deployment/bin/agenthub-backup
+          ../infrastructure/deployment/bin/agenthub-restore-check
+
+  deployment-config:
+    name: Deployment configuration
+    # Everything a host runs, checked before it can be released: the scripts,
+    # the workflows, the compose files, the Caddyfile and the Prometheus
+    # configuration and rules - each by its own tool.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Lint the host scripts (shellcheck)
+        run: |
+          shellcheck --severity=warning --external-sources \
+            infrastructure/deployment/bin/lib.sh \
+            infrastructure/deployment/bin/agenthub-deploy \
+            infrastructure/deployment/bin/agenthub-backup \
+            infrastructure/deployment/bin/agenthub-restore-check \
+            infrastructure/deployment/host/setup-host.sh
+
+      - name: Lint the workflows (actionlint)
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" actionlint
+          ./actionlint -color
+
+      - name: Validate the compose files
+        working-directory: infrastructure/deployment
+        run: |
+          config="$RUNNER_TEMP/agenthub"
+          mkdir -p "$config/secrets"
+          cp config/backend.env.example "$config/backend.env"
+          for name in database_url metrics_token postgres_password; do : > "$config/secrets/$name"; done
+          digest="sha256:$(printf '0%.0s' {1..64})"
+          export AGENTHUB_CONFIG_DIR="$config" AGENTHUB_SITE=agenthub.example.com ACME_EMAIL=ops@example.com
+          export AGENTHUB_BACKEND_IMAGE="ghcr.io/example/agenthub-backend@$digest"
+          export AGENTHUB_WEB_IMAGE="ghcr.io/example/agenthub-web@$digest"
+          docker compose -f compose.yml --profile bundled-db --profile migrate config --quiet
+          docker compose -f compose.yml -f compose.ci.yml --profile bundled-db config --quiet
+
+      - name: Validate the Caddyfile
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --tmpfs /data --tmpfs /config \
+            -e AGENTHUB_SITE=agenthub.example.com -e ACME_EMAIL=ops@example.com \
+            -v "$PWD/infrastructure/deployment/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.11.4-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Validate the Prometheus configuration and rules
+        run: |
+          : > "$RUNNER_TEMP/metrics_token"
+          docker run --rm --network none --read-only --entrypoint promtool \
+            -v "$PWD/infrastructure/deployment/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$PWD/infrastructure/monitoring/prometheus-rules.yml:/etc/prometheus/rules/agenthub.yml:ro" \
+            -v "$RUNNER_TEMP/metrics_token:/run/secrets/metrics_token:ro" \
+            prom/prometheus:v3.13.0@sha256:c6b27ea434f8389bfe233fbc7be381cf50587c286e871bc842008f5a1b1908a7 \
+            check config /etc/prometheus/prometheus.yml
+
+  images:
+    name: Images (build, scan, load test)
+    # Builds the three release images, scans them, and runs the production
+    # compose stack against them with a load test. Read-only: publishing is a
+    # separate job with its own permissions.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TRIVY_VERSION: 0.74.0
+      TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+      K6_VERSION: 2.2.0
+      K6_SHA256: b5a8003c86f35f5cd5ceef1490312c48e587696c94d998cefc6d7b3b4cb1597d
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Build the images
+        env:
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          docker build --file infrastructure/docker/backend.Dockerfile \
+            --build-arg "REVISION=$GITHUB_SHA" --build-arg "SOURCE=$SOURCE" \
+            --tag agenthub-backend:ci .
+          docker build --file infrastructure/docker/web.Dockerfile \
+            --build-arg "REVISION=$GITHUB_SHA" --build-arg "SOURCE=$SOURCE" \
+            --tag agenthub-web:ci .
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=$SOURCE" \
+            --tag agenthub-sandbox:ci agents/sandbox
+
+      # Pinned by version and checked against the checksum recorded when it was
+      # reviewed, like every other tool CI downloads.
+      - name: Install Trivy
+        run: |
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          echo "${TRIVY_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
+
+      - name: Scan the images for known vulnerabilities
+        run: |
+          for image in agenthub-backend:ci agenthub-web:ci agenthub-sandbox:ci; do
+            trivy image --quiet --scanners vuln --ignore-unfixed \
+              --severity HIGH,CRITICAL --exit-code 1 "$image"
+          done
+
+      # Dockerfiles only: Trivy has no compose scanner, and the compose
+      # hardening is asserted by the smoke test running under it instead.
+      - name: Scan the Dockerfiles for misconfiguration
+        run: |
+          trivy config --quiet --severity HIGH,CRITICAL --exit-code 1 infrastructure/docker
+          trivy config --quiet --severity HIGH,CRITICAL --exit-code 1 agents/sandbox
+
+      - name: Generate SBOMs
+        run: |
+          mkdir -p sbom
+          for name in backend web sandbox; do
+            trivy image --quiet --format cyclonedx \
+              --output "sbom/agenthub-$name.cdx.json" "agenthub-$name:ci"
+          done
+
+      - name: Upload the SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom/
+          retention-days: 90
+
+      # The production compose file with the bundled database, served on
+      # http://localhost:8080. Secrets are random per run and shared with the
+      # containers through gid 10001, exactly as on a host.
+      - name: Start the production stack
+        working-directory: infrastructure/deployment
+        run: |
+          config="$RUNNER_TEMP/agenthub"
+          mkdir -p "$config/secrets"
+          cp config/backend.env.example "$config/backend.env"
+          printf 'AGENTHUB_SITE=http://localhost\nACME_EMAIL=ci@example.invalid\nCOMPOSE_PROFILES=bundled-db\n' \
+            > "$config/agenthub.env"
+          printf 'AGENTHUB_BACKEND_IMAGE=agenthub-backend:ci\nAGENTHUB_WEB_IMAGE=agenthub-web:ci\n' \
+            > "$config/release.env"
+          password="$(openssl rand -hex 24)"
+          printf '%s' "$password" > "$config/secrets/postgres_password"
+          printf 'postgresql+asyncpg://agenthub:%s@postgres:5432/agenthub' "$password" \
+            > "$config/secrets/database_url"
+          openssl rand -hex 32 | tr -d '\n' > "$config/secrets/metrics_token"
+          sudo chgrp -R 10001 "$config/secrets"
+          sudo chmod 0750 "$config/secrets"
+          sudo chmod 0640 "$config/secrets"/*
+          echo "AGENTHUB_CONFIG_DIR=$config" >> "$GITHUB_ENV"
+          export AGENTHUB_CONFIG_DIR="$config"
+          compose() {
+            docker compose --project-name agenthub -f compose.yml -f compose.ci.yml \
+              --env-file "$config/release.env" --env-file "$config/agenthub.env" "$@"
+          }
+          compose --profile migrate run --rm migrate
+          compose up --detach --wait
+
+      - name: Smoke test through the edge
+        run: |
+          curl -fsS http://localhost:8080/api/v1/health/ready
+          curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
+          # A client route serves the app shell.
+          curl -fsS http://localhost:8080/agents/does-not-exist | grep -q '<div id="root">'
+          # The page may not be framed.
+          curl -fsSI http://localhost:8080/ | grep -qi "^content-security-policy: frame-ancestors 'none'"
+          # Metrics are internal only.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/metrics)" = 404
+          # Prometheus scrapes the API with the token.
+          for _ in $(seq 1 20); do
+            curl -fsS 'http://localhost:9090/api/v1/targets?state=active' \
+              | jq -e '.data.activeTargets[] | select(.labels.job == "agenthub" and .health == "up")' \
+              > /dev/null && exit 0
+            sleep 3
+          done
+          echo "Prometheus never scraped the API" >&2
+          exit 1
+
+      - name: Create a throwaway load-test account
+        working-directory: infrastructure/deployment
+        run: |
+          password="$(openssl rand -base64 30 | tr -d '\n')"
+          echo "::add-mask::$password"
+          printf '%s\n' "$password" | docker compose --project-name agenthub \
+            -f compose.yml -f compose.ci.yml \
+            --env-file "$AGENTHUB_CONFIG_DIR/release.env" --env-file "$AGENTHUB_CONFIG_DIR/agenthub.env" \
+            run --rm -T backend python -m scripts.create_user \
+              --email load-test@example.com --name "Load Test" \
+              --organization "Load Test" --role admin --password-stdin
+          echo "AGENTHUB_PASSWORD=$password" >> "$GITHUB_ENV"
+
+      - name: Install k6
+        run: |
+          archive="k6-v${K6_VERSION}-linux-amd64.tar.gz"
+          curl -sSfL -o "$archive" \
+            "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/${archive}"
+          echo "${K6_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" --strip-components=1 "k6-v${K6_VERSION}-linux-amd64/k6"
+          sudo install -m 0755 k6 /usr/local/bin/k6
+
+      - name: Load test
+        env:
+          AGENTHUB_URL: http://localhost:8080
+          AGENTHUB_EMAIL: load-test@example.com
+        run: k6 run --summary-export k6-summary.json tests/load/agenthub.js
+
+      - name: Upload the load-test summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: load-test
+          path: k6-summary.json
+          if-no-files-found: ignore
+
+      - name: Show service logs on failure
+        if: failure()
+        working-directory: infrastructure/deployment
+        run: |
+          docker compose --project-name agenthub -f compose.yml -f compose.ci.yml \
+            --env-file "$AGENTHUB_CONFIG_DIR/release.env" --env-file "$AGENTHUB_CONFIG_DIR/agenthub.env" \
+            logs --no-color --tail 200
+
+      - name: Save the images for publishing
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save agenthub-backend:ci agenthub-web:ci agenthub-sandbox:ci | gzip > images.tar.gz
+
+      - name: Upload the images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: images
+          path: images.tar.gz
+          retention-days: 7
+
+  publish:
+    name: Publish release images
+    # Only for main, only after every other job passed. Pushes the exact
+    # images that were scanned and load-tested, and records build provenance
+    # for each digest. The deploy workflow consumes the `release` artifact.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [security, frontend, backend, sandbox, migrations, deployment-config, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the scanned images
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: images
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: push
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          gunzip -c images.tar.gz | docker load
+          prefix="ghcr.io/${OWNER,,}/agenthub-"
+          for name in backend web sandbox; do
+            docker tag "agenthub-$name:ci" "$prefix$name:$GITHUB_SHA"
+            docker push --quiet "$prefix$name:$GITHUB_SHA"
+            reference="$(docker inspect --format '{{index .RepoDigests 0}}' "$prefix$name:$GITHUB_SHA")"
+            echo "$name=$reference" >> "$GITHUB_OUTPUT"
+            echo "${name}_digest=${reference##*@}" >> "$GITHUB_OUTPUT"
+          done
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+
+      - name: Attest the backend image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.prefix }}backend
+          subject-digest: ${{ steps.push.outputs.backend_digest }}
+          push-to-registry: true
+
+      - name: Attest the web image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.prefix }}web
+          subject-digest: ${{ steps.push.outputs.web_digest }}
+          push-to-registry: true
+
+      - name: Attest the sandbox image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.prefix }}sandbox
+          subject-digest: ${{ steps.push.outputs.sandbox_digest }}
+          push-to-registry: true
+
+      - name: Record the release
+        env:
+          BACKEND: ${{ steps.push.outputs.backend }}
+          WEB: ${{ steps.push.outputs.web }}
+          SANDBOX: ${{ steps.push.outputs.sandbox }}
+        run: |
+          jq -n --arg backend "$BACKEND" --arg web "$WEB" --arg sandbox "$SANDBOX" \
+            --arg revision "$GITHUB_SHA" \
+            '{revision: $revision, backend: $backend, web: $web, sandbox: $sandbox}' > release.json
+          cat release.json
+
+      - name: Upload the release record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: release.json
+          retention-days: 90

@@ -1,0 +1,12 @@
+# An allow-list: the frontend sources and lockfile, and the Caddyfile. Never
+# node_modules, a previous dist, local .env files or git history.
+*
+!frontend/
+!infrastructure/deployment/Caddyfile
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+frontend/tsconfig.tsbuildinfo
+frontend/coverage

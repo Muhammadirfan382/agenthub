@@ -103,6 +103,18 @@ content, and a marketplace manifest.
 | Role escalation | Server-side role matrix on every endpoint; nobody grants a role above their own | `services/authorization.py` |
 | An installed agent taking more than granted | Grants can never exceed the manifest; nothing granted by default | `services/registry_service.py` |
 
+### Deployment (Phase 10)
+
+| Threat | Mitigation | Where |
+| --- | --- | --- |
+| A sandbox escape reaching the host | Rootless Docker owned by `agenthub-sandbox`, an account with no secrets. The worker reaches the daemon only through a socket group. Containers keep every Phase 6 guarantee. | `setup-host.sh`, `agenthub-worker.service` |
+| A compromised service container | Read-only, non-root, no capabilities, no-new-privileges, bounded memory and processes. No runtime socket anywhere. The API holds no provider keys and sits on an internal network. | `compose.yml` |
+| A compromised CD pipeline | The SSH key is a forced command running one script that accepts only image digests under one prefix. Host code changes only by `setup-host.sh`. Production needs approval. | `agenthub-deploy`, `deploy.yml` |
+| A tampered image | Built and scanned in CI, pushed by digest, build provenance attested. **Not verified at deploy time** (see §5). | `ci.yml` |
+| Secrets on the host | One file per value. The API's and the worker's secrets are in separate directories with separate groups. Never in images or logs. | `DEPLOYMENT.md` §2 |
+| Stolen backups | Root-only directory. Off-host copies must be encrypted (documented, not enforced). | `agenthub-backup` |
+| Losing the host | Daily backups, weekly restore checks, restore onto a new host. A managed database is recommended. | `OPERATIONS.md` |
+
 ## 5. What is not mitigated
 
 Stated plainly, because a threat model that only lists defences is marketing.
@@ -117,13 +129,20 @@ Stated plainly, because a threat model that only lists defences is marketing.
   (truncated). A secret a user put in a task could end up in a URL and so in the log.
 - **Rate limits are per process.** Several processes each allow the full rate;
   a shared store (Redis) is needed for real limits at scale.
-- **Behind a proxy, unauthenticated clients share an address**, and so share
-  the write limit, until forwarded-for handling is configured (Phase 10).
+- **Forwarded-for trust is configuration.** Real client addresses depend on
+  `FORWARDED_ALLOW_IPS` naming only the reverse proxy. A mistake there either
+  merges every anonymous client into one limiter key or lets clients choose
+  their address.
 - **The development API docs page has no CSP.** It exists only in development.
 - **Secrets from files, not a vault.** `SECRETS_DIR` supports Docker and
   Kubernetes secret mounts; there is no integration with a vault service.
 - **Custom seccomp, user-namespace remapping and gVisor** are not in place for
   the sandbox (Docker's default seccomp applies).
+- **Provenance is attested but not verified at deploy.** Anyone able to push
+  under the allowed registry prefix can ship an image the host will accept.
+- **The API container has a general outbound route** (needed for a managed
+  database). Restrict it with host egress rules.
+- **One host.** No failover: recovery is a restore.
 - **No independent review or penetration test** has been done.
 
 ## 6. When to revisit

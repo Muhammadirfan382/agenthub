@@ -33,9 +33,9 @@ aims to make that safe to do inside an organization by combining two things:
 | 7 | AI/LLM: model gateway, Claude and OpenAI adapters, tool gateway | ✅ Complete (no live provider call made; see below) |
 | 8 | Security layer: policy engine, egress gateway, audit log, CSP, scanning | ✅ Complete |
 | 9 | Monitoring: redacted JSON logs, Prometheus metrics, OpenTelemetry traces, alerts | ✅ Complete (no live Prometheus or collector run; see below) |
-| 10 | Deployment | ⏳ Not started |
+| 10 | Deployment: images, compose stack, CD with rollback, backups, runbooks | ✅ Built, **not yet run or deployed**; production sign-off withheld (see below) |
 
-**What exists today (Phases 0–9):**
+**What exists today (Phases 0–10):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -55,14 +55,15 @@ aims to make that safe to do inside an organization by combining two things:
   - A security layer: every tool call is decided by a policy engine from what the agent declared (allowed domains, egress mode, which risk levels need a person), and the only way out of the server is an SSRF-safe egress gateway - HTTPS GET, allow-listed hosts, public addresses only, connections pinned against DNS rebinding, no redirects, bounded. `api_request` runs through it; every other tool is still recorded as not executed. What it fetches reaches the model labelled as untrusted data.
   - An append-only audit log of security decisions (sign-ins, roles, the kill switch, approvals, policy refusals, every outbound request), readable by administrators; a strict Content-Security-Policy; per-client write limits; dependency and secret scanning in CI with actions pinned to commits. A [threat model](docs/THREAT_MODEL.md) and a [security review](docs/SECURITY_REVIEW.md) say what is and is not covered.
   - Monitoring ([docs/MONITORING.md](docs/MONITORING.md)): JSON logs with request and trace ids and secrets, keys and emails redacted; Prometheus metrics at `/api/v1/metrics` with bounded labels (token-protected, and required in production); OpenTelemetry spans for requests, run steps, sandbox probes, model calls and outbound requests, exported over OTLP when configured; a readiness probe; live component status; and alert rules evaluated by the worker, shown on the Security screen, optionally sent to an HTTPS webhook through the egress gateway, and mirrored as Prometheus rules.
+- Deployment ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)): release images, a hardened compose stack for a Debian 13 host behind Caddy, the worker on the host driving a rootless sandbox daemon under a separate account, a deploy script that migrates, health-checks and rolls back by itself, daily backups with weekly restore checks, CI that scans images, load-tests the production stack and publishes with provenance, and a Deploy workflow (staging, then production behind approval). Runbooks and incident response are in [docs/OPERATIONS.md](docs/OPERATIONS.md). **None of this has run yet:** no host has been prepared and nothing has been pushed, and [docs/SECURITY_SIGNOFF.md](docs/SECURITY_SIGNOFF.md) withholds production sign-off.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
 email verification), tools other than `api_request`, scheduled triggers, real security scanning (the verification label
-is stored, not earned), and deployment. The Prometheus rules and OTLP export
-are written and unit-tested but have not run against a real Prometheus or
-collector.
+is stored, not earned), a deployment that has actually run, and an
+independent security review. The Prometheus rules and OTLP export are written
+and unit-tested but have not run against a real Prometheus or collector.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
 demonstration data.

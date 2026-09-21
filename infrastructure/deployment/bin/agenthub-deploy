@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+# Rolls out, rolls back and reports AgentHub releases on this host.
+#
+#   agenthub-deploy deploy --backend REF --web REF --sandbox REF
+#   agenthub-deploy rollback
+#   agenthub-deploy status
+#   agenthub-deploy --ssh          (forced command for the CD key; see below)
+#
+# Runs as root. The CD pipeline cannot run anything else: its SSH key is bound
+# to `--ssh` in authorized_keys, which reads the requested action from
+# SSH_ORIGINAL_COMMAND, never evaluates it, and accepts only image digests
+# under ALLOWED_IMAGE_PREFIX (/etc/agenthub/deploy.conf). What this script
+# does can only be changed by re-running setup-host.sh from a reviewed
+# checkout, not by the pipeline.
+#
+# A deploy:
+#   1. validates and pulls the three images (the sandbox image into the
+#      rootless daemon);
+#   2. takes a database backup, and stops if it fails;
+#   3. runs migrations, which must be compatible with the running release;
+#   4. starts the new API and web containers and waits for them to be healthy;
+#   5. installs the worker from the backend image and restarts it;
+#   6. smoke-tests through the public site and the worker's metrics endpoint.
+# If 3-6 fail, the previous release is put back automatically. The database is
+# never downgraded: see "Migrations" in docs/DEPLOYMENT.md.
+
+# shellcheck source=lib.sh
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+
+DEPLOY_CONF="$AGENTHUB_CONFIG_DIR/deploy.conf"
+WORKER_ROOT="$AGENTHUB_HOME/worker"
+SANDBOX_DOCKER_HOST="${SANDBOX_DOCKER_HOST:-unix:///srv/agenthub-sandbox/run/docker.sock}"
+HISTORY="$AGENTHUB_STATE_DIR/history.log"
+
+[[ $EUID -eq 0 ]] || die "run as root"
+[[ -r "$DEPLOY_CONF" ]] || die "missing $DEPLOY_CONF"
+# shellcheck source=/dev/null
+source "$DEPLOY_CONF"
+: "${ALLOWED_IMAGE_PREFIX:?set ALLOWED_IMAGE_PREFIX in $DEPLOY_CONF}"
+# shellcheck source=/dev/null
+source "$AGENTHUB_CONFIG_DIR/agenthub.env"
+: "${AGENTHUB_SITE:?set AGENTHUB_SITE in agenthub.env}"
+
+mkdir -p "$AGENTHUB_STATE_DIR"
+exec 9>"$AGENTHUB_STATE_DIR/deploy.lock"
+flock -n 9 || die "another deploy is running"
+
+record() {
+  printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENTHUB_ENVIRONMENT_NAME:-unknown}" "$*" >>"$HISTORY"
+}
+
+write_release() {
+  local file="$1" backend="$2" web="$3" sandbox="$4"
+  printf 'AGENTHUB_BACKEND_IMAGE=%s\nAGENTHUB_WEB_IMAGE=%s\nAGENTHUB_SANDBOX_IMAGE=%s\n' \
+    "$backend" "$web" "$sandbox" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+read_release() {
+  local file="$1"
+  [[ -r "$file" ]] || return 1
+  # Our own file, but parsed rather than sourced all the same.
+  BACKEND=$(sed -n 's/^AGENTHUB_BACKEND_IMAGE=//p' "$file")
+  WEB=$(sed -n 's/^AGENTHUB_WEB_IMAGE=//p' "$file")
+  SANDBOX=$(sed -n 's/^AGENTHUB_SANDBOX_IMAGE=//p' "$file")
+}
+
+sandbox_docker() {
+  runuser -u agenthub-sandbox -- env DOCKER_HOST="$SANDBOX_DOCKER_HOST" docker "$@"
+}
+
+# Called inside `if`, where bash ignores `set -e`: every step checks itself.
+install_worker() {
+  local backend="$1" sandbox="$2"
+  local id dir tmp container
+  id="${backend##*@sha256:}"
+  id="${id:0:16}"
+  dir="$WORKER_ROOT/releases/$id"
+  if [[ ! -x "$dir/venv/bin/python" ]]; then
+    log "installing worker $id from the backend image"
+    tmp=$(mktemp -d "$WORKER_ROOT/releases/.install.XXXXXX") || return 1
+    container=$(docker create "$backend") || return 1
+    local copied=0
+    docker cp "$container:/opt/agenthub/backend" "$tmp/backend" &&
+      docker cp "$container:/opt/agenthub/wheels" "$tmp/wheels" &&
+      docker cp "$container:/opt/agenthub/requirements.txt" "$tmp/requirements.txt" ||
+      copied=1
+    docker rm "$container" >/dev/null || true
+    [[ $copied -eq 0 ]] || { rm -rf "$tmp"; return 1; }
+    # The wheels scanned and signed with the image; no index is consulted.
+    if ! python3 -m venv "$tmp/venv" ||
+      ! "$tmp/venv/bin/pip" install --quiet --no-index --find-links "$tmp/wheels" \
+        --requirement "$tmp/requirements.txt"; then
+      rm -rf "$tmp"
+      return 1
+    fi
+    chown -R root:agenthub "$tmp" || return 1
+    chmod -R u=rwX,g=rX,o= "$tmp" || return 1
+    mv "$tmp" "$dir" || return 1
+  fi
+  printf 'SANDBOX_IMAGE=%s\n' "$sandbox" >"$dir/release.env" || return 1
+  chown root:agenthub "$dir/release.env" || return 1
+  chmod 0640 "$dir/release.env" || return 1
+  ln -sfn "$dir" "$WORKER_ROOT/current.new" || return 1
+  mv -T "$WORKER_ROOT/current.new" "$WORKER_ROOT/current" || return 1
+  systemctl restart agenthub-worker
+}
+
+smoke_test() {
+  local site="${AGENTHUB_SITE#http://}"
+  site="${site#https://}"
+  log "smoke test through https://$site"
+  local attempt
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 5 \
+      --resolve "$site:443:127.0.0.1" "https://$site/api/v1/health/ready" >/dev/null &&
+      curl --fail --silent --max-time 5 --resolve "$site:443:127.0.0.1" "https://$site/" \
+        | grep -q '<div id="root">'; then
+      break
+    fi
+    [[ $attempt -eq 30 ]] && { log "the site did not become ready"; return 1; }
+    sleep 2
+  done
+
+  systemctl is-active --quiet agenthub-worker || { log "the worker is not running"; return 1; }
+  # The token goes through a 0600 file: a command line is readable by every
+  # local user in the process list.
+  local headers token
+  headers=$(mktemp) || return 1
+  token=$(<"$AGENTHUB_CONFIG_DIR/worker/secrets/metrics_token") || return 1
+  printf 'Authorization: Bearer %s\n' "$token" >"$headers"
+  for attempt in $(seq 1 30); do
+    if curl --fail --silent --max-time 5 -H "@$headers" "http://172.30.2.1:9464/metrics" |
+      grep -q '^agenthub_build_info'; then
+      rm -f "$headers"
+      return 0
+    fi
+    sleep 2
+  done
+  rm -f "$headers"
+  log "the worker's metrics endpoint did not answer"
+  return 1
+}
+
+activate() {
+  local backend="$1" web="$2" sandbox="$3"
+  write_release "$AGENTHUB_STATE_DIR/release.env" "$backend" "$web" "$sandbox"
+  compose --profile migrate run --rm migrate || return 1
+  compose up --detach --wait --remove-orphans || return 1
+  install_worker "$backend" "$sandbox" || return 1
+  smoke_test || return 1
+}
+
+deploy() {
+  local backend="" web="" sandbox=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --backend) backend="${2:-}"; shift 2 ;;
+      --web) web="${2:-}"; shift 2 ;;
+      --sandbox) sandbox="${2:-}"; shift 2 ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  validate_image "$backend" "$ALLOWED_IMAGE_PREFIX"
+  validate_image "$web" "$ALLOWED_IMAGE_PREFIX"
+  validate_image "$sandbox" "$ALLOWED_IMAGE_PREFIX"
+
+  log "pulling images"
+  docker pull --quiet "$backend" >/dev/null
+  docker pull --quiet "$web" >/dev/null
+  sandbox_docker pull --quiet "$sandbox" >/dev/null
+
+  local had_previous=0
+  if [[ -r "$AGENTHUB_STATE_DIR/release.env" ]]; then
+    had_previous=1
+    log "backing up the database before migrating"
+    "$AGENTHUB_HOME/bin/agenthub-backup" || die "backup failed; nothing was changed"
+    cp "$AGENTHUB_STATE_DIR/release.env" "$AGENTHUB_STATE_DIR/previous.env"
+  else
+    log "first deploy on this host: nothing to back up yet"
+  fi
+
+  if activate "$backend" "$web" "$sandbox"; then
+    record "deployed backend=$backend web=$web sandbox=$sandbox"
+    log "deployed"
+    return 0
+  fi
+
+  record "FAILED backend=$backend web=$web sandbox=$sandbox"
+  if [[ $had_previous -eq 1 ]] && read_release "$AGENTHUB_STATE_DIR/previous.env"; then
+    log "the new release failed; rolling back to the previous one"
+    if activate "$BACKEND" "$WEB" "$SANDBOX"; then
+      record "rolled back automatically to backend=$BACKEND"
+      die "deploy failed and was rolled back"
+    fi
+    record "ROLLBACK FAILED"
+    die "deploy failed and the rollback failed too: follow docs/OPERATIONS.md"
+  fi
+  die "deploy failed and there is no previous release to return to"
+}
+
+rollback() {
+  read_release "$AGENTHUB_STATE_DIR/previous.env" || die "no previous release recorded"
+  local current_backend="" current_web="" current_sandbox=""
+  if read_release "$AGENTHUB_STATE_DIR/release.env"; then
+    current_backend=$BACKEND current_web=$WEB current_sandbox=$SANDBOX
+    read_release "$AGENTHUB_STATE_DIR/previous.env"
+  fi
+  log "rolling back to backend=$BACKEND"
+  activate "$BACKEND" "$WEB" "$SANDBOX" || die "rollback failed: follow docs/OPERATIONS.md"
+  # Swap, so a second rollback returns to where we started.
+  if [[ -n "$current_backend" ]]; then
+    write_release "$AGENTHUB_STATE_DIR/previous.env" "$current_backend" "$current_web" "$current_sandbox"
+  fi
+  record "rolled back to backend=$BACKEND"
+}
+
+status() {
+  if read_release "$AGENTHUB_STATE_DIR/release.env"; then
+    printf 'backend  %s\nweb      %s\nsandbox  %s\n' "$BACKEND" "$WEB" "$SANDBOX"
+  else
+    echo "no release deployed"
+  fi
+  printf 'worker   %s\n' "$(systemctl is-active agenthub-worker || true)"
+  compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}'
+}
+
+# The CD key's only entry point. The command is split on whitespace and
+# matched against the three allowed forms; nothing is evaluated.
+from_ssh() {
+  local -a words
+  read -r -a words <<<"${SSH_ORIGINAL_COMMAND:-}"
+  case "${words[0]:-}" in
+    deploy)
+      [[ ${#words[@]} -eq 7 ]] || die "usage: deploy --backend REF --web REF --sandbox REF"
+      deploy "${words[@]:1}"
+      ;;
+    rollback) [[ ${#words[@]} -eq 1 ]] || die "usage: rollback"; rollback ;;
+    status) [[ ${#words[@]} -eq 1 ]] || die "usage: status"; status ;;
+    *) die "not allowed" ;;
+  esac
+}
+
+case "${1:-}" in
+  deploy) shift; deploy "$@" ;;
+  rollback) rollback ;;
+  status) status ;;
+  --ssh) from_ssh ;;
+  *) die "usage: agenthub-deploy deploy|rollback|status" ;;
+esac

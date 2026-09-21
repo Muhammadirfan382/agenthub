@@ -70,8 +70,13 @@ and no token. Development leaves the endpoint open for convenience. Set
 `METRICS_ENABLED=false` to remove it entirely (404). The endpoint does not
 measure itself.
 
-Counters live in each process. With several API processes, scrape each one.
-Prometheus sums them.
+Counters live in each process. In production the worker is its own process
+on the host and counts most of what matters (runs, model calls, tool calls,
+egress, sandbox checks, alert gauges). With `WORKER_METRICS_PORT` set it
+serves them at `GET /metrics` on `WORKER_METRICS_HOST`, behind the same token.
+`infrastructure/deployment/prometheus.yml` scrapes both, as jobs `agenthub`
+and `agenthub-worker`. With several processes, scrape each one: Prometheus
+sums them.
 
 ## 3. Traces
 
@@ -146,7 +151,10 @@ It has **not** been evaluated by a running Prometheus here.
 `system/status` is honest rather than green. With no provider key, `models` is
 `degraded`. With no container runtime, `sandbox` is `degraded`. With queued work
 and no live worker heartbeat, `runtime` is an `outage`. Any firing alert
-degrades `security`.
+degrades `security`. "Provider key" and "container runtime" mean the
+runtime's, not the API process's. In production the worker holds both and
+reports them every minute (`runtime_workers`). A worker silent for three
+minutes stops counting.
 
 ## 6. Runbooks
 
