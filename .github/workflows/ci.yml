@@ -426,7 +426,9 @@ jobs:
             docker compose --project-name agenthub -f compose.yml -f compose.ci.yml \
               --env-file "$config/release.env" --env-file "$config/agenthub.env" "$@"
           }
-          compose --profile migrate run --rm migrate
+          # Kept for the failure report: the container is removed after it runs.
+          compose --profile migrate run --rm migrate 2>&1 | tee "$RUNNER_TEMP/migrate.log"
+          test "${PIPESTATUS[0]}" -eq 0
           compose up --detach --wait
 
       - name: Smoke test through the edge
@@ -495,9 +497,12 @@ jobs:
             echo "The stack was not started; no service logs."
             exit 0
           fi
-          docker compose --project-name agenthub -f compose.yml -f compose.ci.yml \
+          # States and last log lines become annotations and the job summary,
+          # readable without opening this log.
+          python3 ../../.github/scripts/compose_report.py --project-name agenthub \
+            -f compose.yml -f compose.ci.yml \
             --env-file "$AGENTHUB_CONFIG_DIR/release.env" --env-file "$AGENTHUB_CONFIG_DIR/agenthub.env" \
-            logs --no-color --tail 200 || true
+            || true
 
       - name: Save the images for publishing
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
