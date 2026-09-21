@@ -39,8 +39,12 @@
 	encode zstd gzip
 
 	# Scraped by Prometheus over the internal network, never from outside.
-	@metrics path /api/v1/metrics /api/v1/metrics/*
-	respond @metrics 404
+	# A handle block of its own: Caddy runs `handle` before `respond`, so a
+	# bare respond here was never reached and /api/* proxied metrics out.
+	# The more specific path sorts ahead of /api/*.
+	handle /api/v1/metrics* {
+		respond 404
+	}
 
 	handle /api/* {
 		# The backend sets its own security headers on API responses.
