@@ -145,7 +145,9 @@ smoke_test() {
 activate() {
   local backend="$1" web="$2" sandbox="$3"
   write_release "$AGENTHUB_STATE_DIR/release.env" "$backend" "$web" "$sandbox"
-  compose --profile migrate run --rm migrate || return 1
+  # Naming the service enables its profile; no --profile, which would replace
+  # COMPOSE_PROFILES (and drop the bundled database).
+  compose run --rm migrate || return 1
   compose up --detach --wait --remove-orphans || return 1
   install_worker "$backend" "$sandbox" || return 1
   smoke_test || return 1

@@ -23,8 +23,13 @@ validate_image() {
   [[ "$ref" == "$prefix"* ]] || die "image is not under the allowed prefix $prefix: $ref"
 }
 
+# Compose takes interpolation variables from --env-file but not its own
+# settings: COMPOSE_PROFILES there is ignored, so the bundled database would
+# never start. It is read from agenthub.env and passed in the environment.
 compose() {
-  docker compose \
+  local profiles
+  profiles=$(sed -n 's/^COMPOSE_PROFILES=//p' "$AGENTHUB_CONFIG_DIR/agenthub.env" | tail -n 1)
+  COMPOSE_PROFILES="$profiles" docker compose \
     --project-name agenthub \
     --file "$COMPOSE_FILE" \
     --env-file "$AGENTHUB_STATE_DIR/release.env" \

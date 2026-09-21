@@ -331,6 +331,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      # Compose ignores COMPOSE_PROFILES in an --env-file; like the host's
+      # deploy script, every compose call here gets it from the environment.
+      COMPOSE_PROFILES: bundled-db
       TRIVY_VERSION: 0.74.0
       TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
       K6_VERSION: 2.2.0
@@ -427,7 +430,7 @@ jobs:
               --env-file "$config/release.env" --env-file "$config/agenthub.env" "$@"
           }
           # Kept for the failure report: the container is removed after it runs.
-          compose --profile migrate run --rm migrate 2>&1 | tee "$RUNNER_TEMP/migrate.log"
+          compose run --rm migrate 2>&1 | tee "$RUNNER_TEMP/migrate.log"
           test "${PIPESTATUS[0]}" -eq 0
           compose up --detach --wait
 
