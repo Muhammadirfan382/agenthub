@@ -7,7 +7,7 @@
 #
 # Built from the repository root. Base images are pinned by digest.
 
-FROM node:24.17.0-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS build
+FROM node:26.9.0-alpine@sha256:dbaa92e5758cbbcf85d65d5403fdb530fe3442cbe8c6dbfb7ef23365450d5070 AS build
 
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
