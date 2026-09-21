@@ -109,7 +109,23 @@ which parts exist today and which are planned, are in
 
 ## Running AgentHub locally (Windows PowerShell)
 
-Open two terminals at the repository root.
+**Quick start (one command).** From the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1
+```
+
+It prepares whatever is missing (Python environment, npm packages, a local
+`.env`, the SQLite schema), offers to create your own sign-in account (you type
+the password at its prompt), then opens the backend and the web app in two
+windows and your browser at `http://127.0.0.1:5173`, signed out and pointed at
+the local backend. Close the two windows to stop. `-ExecutionPolicy Bypass`
+applies to that one command only.
+
+If the app opens in *Demo mode* instead, that browser remembered an earlier
+choice: switch in **Settings → API → Data source → Backend API**.
+
+**Step by step (what the script does).** Open two terminals at the repository root.
 
 **Terminal 1: backend**
 
