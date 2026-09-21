@@ -300,9 +300,13 @@ jobs:
           docker compose -f compose.yml --profile bundled-db --profile migrate config --quiet
           docker compose -f compose.yml -f compose.ci.yml --profile bundled-db config --quiet
 
+      # The official image's caddy binary carries a file capability, and the
+      # kernel refuses to execute it with every capability dropped (exit 255
+      # before Caddy runs). This throwaway, networkless container keeps that
+      # one; the web image removes the file capability instead.
       - name: Validate the Caddyfile
         run: |
-          docker run --rm --network none --read-only --cap-drop ALL \
+          docker run --rm --network none --read-only --cap-drop ALL --cap-add NET_BIND_SERVICE \
             --tmpfs /data --tmpfs /config \
             -e AGENTHUB_SITE=agenthub.example.com -e ACME_EMAIL=ops@example.com \
             -v "$PWD/infrastructure/deployment/Caddyfile:/etc/caddy/Caddyfile:ro" \

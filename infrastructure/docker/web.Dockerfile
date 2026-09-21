@@ -32,10 +32,13 @@ LABEL org.opencontainers.image.title="agenthub-web" \
       org.opencontainers.image.revision="${REVISION}"
 
 # Caddy runs unprivileged and listens on 8080/8443; the host maps 80/443 to
-# them. (Binding low ports would need a file capability, which
-# no-new-privileges correctly refuses to grant.) Its state directories are
-# created here so the named volumes mounted over them start out owned by it.
-RUN addgroup -S -g 10002 caddy-web \
+# them. The base image gives the binary a file capability (to bind low
+# ports); it is removed, because a container started with every capability
+# dropped cannot execute a binary that carries one - the kernel refuses the
+# exec outright. Its state directories are created here so the named volumes
+# mounted over them start out owned by it.
+RUN setcap -r /usr/bin/caddy \
+    && addgroup -S -g 10002 caddy-web \
     && adduser -S -u 10002 -G caddy-web -H -h /nonexistent -s /sbin/nologin caddy-web \
     && mkdir -p /data/caddy /config/caddy \
     && chown -R 10002:10002 /data /config
