@@ -23,6 +23,42 @@ ENV VITE_DATA_SOURCE=api \
 RUN npm run build
 
 
+# Caddy, rebuilt. The v2.11.4 release binary embeds Go 1.26.3 and library
+# versions with known HIGH vulnerabilities (the CI image scan lists them).
+# This compiles the same Caddy release with a patched Go and the patched
+# library versions Caddy's own main branch has moved to. Every version is
+# explicit, and Go verifies each module against its checksum database.
+FROM golang:1.26.8-alpine3.24@sha256:51a7c389a5ddaf82f527191a1e9bff9928655130a44e4975dd1d7e0acf59f1ae AS caddy
+
+ENV CGO_ENABLED=0 \
+    GOTOOLCHAIN=local \
+    GOFLAGS=-trimpath
+WORKDIR /src
+COPY <<'GO' main.go
+package main
+
+import (
+	caddycmd "github.com/caddyserver/caddy/v2/cmd"
+
+	// The standard modules: everything the Caddyfile uses, nothing extra.
+	_ "github.com/caddyserver/caddy/v2/modules/standard"
+)
+
+func main() {
+	caddycmd.Main()
+}
+GO
+RUN go mod init agenthub.local/caddy \
+    && go get github.com/caddyserver/caddy/v2@v2.11.4 \
+    && go get google.golang.org/grpc@v1.83.2 \
+              golang.org/x/net@v0.58.0 \
+              golang.org/x/text@v0.41.0 \
+              golang.org/x/crypto@v0.55.0 \
+    && go mod tidy \
+    && go build -ldflags "-s -w" -o /out/caddy . \
+    && /out/caddy version
+
+
 FROM caddy:2.11.4-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e AS runtime
 
 ARG REVISION=unknown
@@ -43,6 +79,9 @@ RUN setcap -r /usr/bin/caddy \
     && mkdir -p /data/caddy /config/caddy \
     && chown -R 10002:10002 /data /config
 
+# The rebuilt binary replaces the release one (and carries no file
+# capability of its own).
+COPY --from=caddy /out/caddy /usr/bin/caddy
 COPY --from=build /build/dist /srv
 COPY infrastructure/deployment/Caddyfile /etc/caddy/Caddyfile
 

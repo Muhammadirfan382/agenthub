@@ -87,14 +87,18 @@ def main(paths: list[str]) -> int:
             handle.write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
-    for row in rows[:MAX_ANNOTATIONS]:
+    # GitHub keeps only the first ten error annotations of a step, so the total
+    # goes first: a truncated list must not look complete.
+    if rows:
+        images = sorted({row["image"] for row in rows})
+        print(
+            f"::error title={len(rows)} findings in {', '.join(images)}::"
+            "Every finding is listed in the job summary."
+        )
+    for row in rows[: MAX_ANNOTATIONS - 1]:
         print(
             f"::error title={row['severity']} {row['id']} in {row['image']}::"
             f"{row['package']} {row['installed']} -> fixed in {row['fixed']} ({row['target']})"
-        )
-    if len(rows) > MAX_ANNOTATIONS:
-        print(
-            f"::error title=More findings::{len(rows) - MAX_ANNOTATIONS} more in the job summary"
         )
     return 1 if rows else 0
 

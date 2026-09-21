@@ -28,6 +28,11 @@ COPY probe.py /opt/agenthub/probe.py
 # a read-only root filesystem, so this is belt and braces.
 RUN chmod 0444 /opt/agenthub/probe.py
 
+# The probe needs Python and nothing else. pip (and the old library copies it
+# bundles, which scanners flag) has no business in a sandbox.
+RUN python -m pip uninstall --yes --quiet pip \
+    && rm -rf /usr/local/lib/python3.13/ensurepip
+
 USER 65532:65532
 
 # No shell in the entrypoint: one process, no interpretation of arguments.
