@@ -11,7 +11,9 @@
 # It is never run with a mounted socket, a host path, or the host's
 # environment: see backend/app/sandbox/spec.py for how it is started.
 
-FROM python:3.13-alpine3.21
+# Pinned by digest like every other base image; Dependabot proposes updates.
+# Alpine 3.21 shipped an OpenSSL with known HIGH/CRITICAL fixes pending.
+FROM python:3.13.15-alpine3.24@sha256:1a63a53928ce53d2b0baf08092a703f4840ac5dfbd61fd48802dbf48e08c801e
 
 # A fixed, unprivileged account. 65532 is the conventional "nonroot" id, and
 # using a number rather than a name means the container cannot be started as

@@ -51,6 +51,13 @@ RUN groupadd --system --gid 10001 agenthub \
        --home-dir /nonexistent --shell /usr/sbin/nologin agenthub
 
 COPY --from=build /opt/venv /opt/venv
+# Nothing at runtime installs packages, so pip is removed from the system
+# Python, the virtual environment and ensurepip. It also bundles its own old
+# copies of other libraries that scanners rightly flag. (Worker hosts install
+# the wheels below with their own pip.)
+RUN /opt/venv/bin/python -m pip uninstall --yes --quiet pip \
+    && python -m pip uninstall --yes --quiet pip \
+    && rm -rf /usr/local/lib/python3.13/ensurepip
 COPY --from=build /wheels /opt/agenthub/wheels
 COPY backend/requirements.txt /opt/agenthub/requirements.txt
 COPY backend/alembic.ini /opt/agenthub/backend/alembic.ini
