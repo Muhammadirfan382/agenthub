@@ -1,6 +1,6 @@
 import { Activity, CircleCheck, Coins, Timer } from 'lucide-react';
 import { BarChart } from '@/components/charts/BarChart';
-import { DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { QueryState } from '@/components/feedback/QueryState';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -19,7 +19,12 @@ export default function AnalyticsPage() {
   return (
     <>
       <PageHeader title="Analytics" description="Execution volume, outcomes and token usage over the last 14 days." />
-      <DemoNotice className="mb-6">Analytics are computed from demonstration data. They are not real usage statistics.</DemoNotice>
+      <DataNotice
+        resource="analytics"
+        className="mb-6"
+        demo="Analytics are computed from demonstration data. They are not real usage statistics."
+        live="Computed from your organization's runs and recorded model usage. Cost is an estimate from published prices, not a bill."
+      />
 
       <QueryState query={query} loading={<LoadingState label="Loading analytics…" />} errorTitle="Analytics could not be loaded">
         {(data) => {
@@ -31,7 +36,13 @@ export default function AnalyticsPage() {
                 <StatCard label="Success rate" value={`${Math.round(data.successRate * 100)}%`} icon={CircleCheck} tone="success" description="Of finished executions" />
                 <StatCard label="Average duration" value={formatDuration(data.averageDurationMs)} icon={Timer} tone="info" />
                 <StatCard label="Executions tracked" value={formatNumber(totalExecutions)} icon={Activity} tone="brand" />
-                <StatCard label="Tokens (14 days)" value={formatCompact(tokens14d)} icon={Coins} tone="warning" />
+                <StatCard
+                  label="Tokens (14 days)"
+                  value={formatCompact(tokens14d)}
+                  icon={Coins}
+                  tone="warning"
+                  description={data.estimatedCostUsd === undefined ? undefined : `About $${data.estimatedCostUsd.toFixed(2)} estimated`}
+                />
               </section>
 
               <div className="mt-6 grid gap-6 lg:grid-cols-2">

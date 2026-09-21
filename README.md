@@ -32,9 +32,10 @@ aims to make that safe to do inside an organization by combining two things:
 | 6 | Docker sandbox: isolated, verified containers per run | ✅ Complete (real-container tests run in CI only) |
 | 7 | AI/LLM: model gateway, Claude and OpenAI adapters, tool gateway | ✅ Complete (no live provider call made; see below) |
 | 8 | Security layer: policy engine, egress gateway, audit log, CSP, scanning | ✅ Complete |
-| 9–10 | Monitoring, deployment | ⏳ Not started |
+| 9 | Monitoring: redacted JSON logs, Prometheus metrics, OpenTelemetry traces, alerts | ✅ Complete (no live Prometheus or collector run; see below) |
+| 10 | Deployment | ⏳ Not started |
 
-**What exists today (Phases 0–8):**
+**What exists today (Phases 0–9):**
 
 - Repository structure, development rules ([CLAUDE.md](CLAUDE.md)), architecture
   notes ([ARCHITECTURE.md](ARCHITECTURE.md)) and a roadmap
@@ -42,7 +43,7 @@ aims to make that safe to do inside an organization by combining two things:
 - A React + TypeScript frontend ([docs/FRONTEND.md](docs/FRONTEND.md)):
   - Screens: application shell, dashboard, agent management (list, details, create/edit), marketplace, executions (list and detail), security dashboard, analytics and settings.
   - Foundations: a reusable design system and a typed service layer.
-  - Data: two modes, switchable in **Settings → API**. *Demo* answers everything from **clearly labelled demonstration data**; *API* reads agents, executions and dashboard counts from the backend and keeps saying which sections are still demo data.
+  - Data: two modes, switchable in **Settings → API**. *Demo* answers everything from **clearly labelled demonstration data**; *API* reads everything from the backend, including security, analytics, component status and alerts, and each page says which mode it is showing.
 - A FastAPI backend ([docs/BACKEND.md](docs/BACKEND.md)) that persists agents and executions:
   - Routers → services → repositories, Alembic migrations, SQLite for local development and PostgreSQL for production.
   - A uniform `{code, message, details}` error envelope, request ids, security headers, pagination and server-side validation and risk scoring.
@@ -53,12 +54,15 @@ aims to make that safe to do inside an organization by combining two things:
   - A model gateway: with `AGENTHUB_ANTHROPIC_API_KEY` (or `AGENTHUB_OPENAI_API_KEY`) set, a real model answers each run. Agents pick a tier; the deployment routes it to a model. Every request is rate limited, budgeted and metered per organization, and credentials never leave the server.
   - A security layer: every tool call is decided by a policy engine from what the agent declared (allowed domains, egress mode, which risk levels need a person), and the only way out of the server is an SSRF-safe egress gateway - HTTPS GET, allow-listed hosts, public addresses only, connections pinned against DNS rebinding, no redirects, bounded. `api_request` runs through it; every other tool is still recorded as not executed. What it fetches reaches the model labelled as untrusted data.
   - An append-only audit log of security decisions (sign-ins, roles, the kill switch, approvals, policy refusals, every outbound request), readable by administrators; a strict Content-Security-Policy; per-client write limits; dependency and secret scanning in CI with actions pinned to commits. A [threat model](docs/THREAT_MODEL.md) and a [security review](docs/SECURITY_REVIEW.md) say what is and is not covered.
+  - Monitoring ([docs/MONITORING.md](docs/MONITORING.md)): JSON logs with request and trace ids and secrets, keys and emails redacted; Prometheus metrics at `/api/v1/metrics` with bounded labels (token-protected, and required in production); OpenTelemetry spans for requests, run steps, sandbox probes, model calls and outbound requests, exported over OTLP when configured; a readiness probe; live component status; and alert rules evaluated by the worker, shown on the Security screen, optionally sent to an HTTPS webhook through the egress gateway, and mirrored as Prometheus rules.
 - Unit and component tests (Vitest + Testing Library, pytest), linting and type checking.
 - A GitHub Actions CI workflow.
 
 **What does not exist yet:** MFA and SSO, email delivery (so no password reset or
 email verification), tools other than `api_request`, scheduled triggers, real security scanning (the verification label
-is stored, not earned), monitoring and deployment.
+is stored, not earned), and deployment. The Prometheus rules and OTLP export
+are written and unit-tested but have not run against a real Prometheus or
+collector.
 Directories for these areas are placeholders. Nothing here has been deployed,
 penetration-tested or reviewed outside this repository: run it locally, with
 demonstration data.

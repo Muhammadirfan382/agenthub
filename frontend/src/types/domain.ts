@@ -514,8 +514,23 @@ export interface SecurityOverview {
 
 export type ComponentState = 'operational' | 'degraded' | 'outage';
 
+/** An alert the platform raised from its own data. */
+export interface AlertRecord {
+  id: ID;
+  rule: string;
+  severity: 'info' | 'warning' | 'critical';
+  state: 'firing' | 'resolved';
+  summary: string;
+  /** Counts behind the alert. Never content. */
+  detail: Record<string, unknown>;
+  firstSeen: ISODate;
+  lastSeen: ISODate;
+  resolvedAt: ISODate | null;
+  occurrences: number;
+}
+
 export interface SystemComponentStatus {
-  id: 'api' | 'runtime' | 'database' | 'security';
+  id: 'api' | 'runtime' | 'database' | 'security' | 'models' | 'sandbox';
   name: string;
   state: ComponentState;
   detail: string;
@@ -542,6 +557,8 @@ export interface AnalyticsSummary {
   averageDurationMs: number;
   topAgents: { agentId: ID; name: string; executions: number }[];
   statusBreakdown: Record<ExecutionStatus, number>;
+  /** Estimated from published prices; absent in demo mode. */
+  estimatedCostUsd?: number;
 }
 
 export interface UserProfile {

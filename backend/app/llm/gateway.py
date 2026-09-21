@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from datetime import time as clock_time
 
+from opentelemetry.trace import SpanKind
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,8 @@ from app.llm.pricing import cost_microusd
 from app.llm.providers import ModelProvider
 from app.llm.routing import Route, route_for, routes
 from app.llm.types import Message, ModelRequest, ModelResponse, ToolSpec
+from app.observability import tracing
+from app.observability.metrics import MODEL_COST, MODEL_DURATION, MODEL_REQUESTS, MODEL_TOKENS
 
 logger = logging.getLogger(__name__)
 
@@ -151,18 +154,48 @@ class ModelGateway:
         )
         started = time.monotonic()
         try:
-            response = await provider.complete(request)
+            with tracing.span(
+                "model.complete",
+                {
+                    "gen_ai.system": route.provider,
+                    "gen_ai.request.model": route.model,
+                    "agenthub.tier": tier,
+                },
+                kind=SpanKind.CLIENT,
+            ):
+                response = await provider.complete(request)
         except ModelError as error:
             await self._record(
                 session, organization_id, execution_id, route, error.kind, started=started
             )
+            MODEL_REQUESTS.labels(
+                provider=route.provider, model=route.model, outcome=error.kind
+            ).inc()
             logger.warning(
                 "model request failed",
                 extra={"provider": route.provider, "model": route.model, "kind": error.kind},
             )
             raise
 
+        elapsed = time.monotonic() - started
         cost = cost_microusd(route.provider, response.served_by, response.usage)
+        served = response.served_by
+        MODEL_REQUESTS.labels(
+            provider=route.provider,
+            model=served,
+            outcome="refused" if response.stop == "refusal" else "ok",
+        ).inc()
+        MODEL_DURATION.labels(provider=route.provider, model=served).observe(elapsed)
+        for kind, count in (
+            ("input", response.usage.input_tokens),
+            ("output", response.usage.output_tokens),
+            ("cache_read", response.usage.cache_read_tokens),
+            ("cache_write", response.usage.cache_write_tokens),
+        ):
+            if count:
+                MODEL_TOKENS.labels(provider=route.provider, model=served, kind=kind).inc(count)
+        if cost:
+            MODEL_COST.labels(provider=route.provider, model=served).inc(cost)
         await self._record(
             session,
             organization_id,

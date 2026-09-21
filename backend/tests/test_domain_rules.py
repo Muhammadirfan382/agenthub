@@ -77,6 +77,7 @@ class TestSettings:
         settings = Settings(
             environment="production",
             database_url="postgresql+asyncpg://agenthub:sup3rsecret@db.internal:5432/agenthub",
+            metrics_enabled=False,
             _env_file=None,
         )
 

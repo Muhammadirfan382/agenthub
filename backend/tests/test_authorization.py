@@ -15,6 +15,10 @@ from tests.factories import agent_payload
 # Routes that are reachable without a session, and why.
 PUBLIC_PATHS = {
     ("GET", "/api/v1/health"),  # liveness probe
+    ("GET", "/api/v1/health/ready"),  # readiness probe: one database check, no details
+    # Scraped by Prometheus, not a person: closed by METRICS_TOKEN, which
+    # production requires (tests/test_observability.py covers both).
+    ("GET", "/api/v1/metrics"),
     ("POST", "/api/v1/auth/login"),  # how a session is obtained
 }
 

@@ -13,16 +13,25 @@ import contextlib
 import logging
 import os
 import socket
+import time
 import uuid
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.config import Settings, get_settings
+from app.core.config import SERVICE_VERSION, Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.time import now_utc
-from app.db.models import Execution
+from app.db.models import Execution, ExecutionApproval
 from app.db.session import create_engine, create_session_factory
+from app.observability import alerts
+from app.observability.metrics import (
+    APPROVALS_PENDING,
+    EXECUTIONS_QUEUED,
+    EXECUTIONS_RUNNING,
+    record_build,
+)
+from app.observability.tracing import configure_tracing
 from app.runtime.engine import run_to_completion, stale_before
 
 logger = logging.getLogger(__name__)
@@ -186,7 +195,9 @@ async def work_loop(
     poll_seconds: float = POLL_SECONDS,
     settings: Settings | None = None,
 ) -> None:
+    resolved = settings or get_settings()
     logger.info("runtime worker started", extra={"worker": worker})
+    next_watch = 0.0
     while not stop.is_set():
         try:
             did_work = await run_once(session_factory, worker=worker, settings=settings)
@@ -194,15 +205,59 @@ async def work_loop(
             logger.exception("worker loop error")
             did_work = False
 
+        # The worker is the one process that always runs, so it is also the one
+        # that publishes queue gauges and evaluates alert rules.
+        if time.monotonic() >= next_watch:
+            next_watch = time.monotonic() + resolved.alert_interval_seconds
+            await watch(session_factory, resolved)
+
         if not did_work:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
     logger.info("runtime worker stopped", extra={"worker": worker})
 
 
+async def watch(session_factory: async_sessionmaker[AsyncSession], settings: Settings) -> None:
+    """Publishes the queue gauges and evaluates the alert rules.
+
+    Never raises: monitoring that can stop the runtime is worse than no
+    monitoring at all.
+    """
+    try:
+        async with session_factory() as session:
+            queued = await session.scalar(
+                select(func.count(Execution.id)).where(Execution.status == "QUEUED")
+            )
+            running = await session.scalar(
+                select(func.count(Execution.id)).where(
+                    Execution.status.in_(["STARTING", "RUNNING"])
+                )
+            )
+            waiting = await session.scalar(
+                select(func.count(ExecutionApproval.id)).where(
+                    ExecutionApproval.status == "pending"
+                )
+            )
+        EXECUTIONS_QUEUED.set(int(queued or 0))
+        EXECUTIONS_RUNNING.set(int(running or 0))
+        APPROVALS_PENDING.set(int(waiting or 0))
+    except Exception:
+        logger.exception("could not publish queue gauges")
+
+    try:
+        firing = await alerts.evaluate_all(session_factory, settings)
+        logger.debug("alert rules evaluated", extra={"firing": firing})
+    except Exception:
+        logger.exception("could not evaluate alert rules")
+
+
 async def main(settings: Settings | None = None) -> None:
     configure_logging()
     resolved = settings or get_settings()
+    # A standalone worker is its own process: it needs its own tracing and
+    # build metric, or its spans would be no-ops and its logs uncorrelated.
+    configure_tracing(resolved)
+    record_build(SERVICE_VERSION, resolved.environment)
     engine = create_engine(resolved)
     stop = asyncio.Event()
     try:

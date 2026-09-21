@@ -88,6 +88,13 @@ variable is available unless it has been deliberately granted.
   provider SDK from anywhere else, never log a prompt, an answer or a key, and
   never execute a tool until egress controls exist. Tests must not reach a real
   provider.
+- Metrics live in `backend/app/observability/metrics.py`. Every label must have
+  a small, fixed set of values: route templates, status classes, enums. Never
+  use an id, a name, an email or anything a caller controls as a label. Span
+  attributes and webhook payloads carry counts and metadata, never prompts,
+  answers, fetched content, credentials or personal data. Log through the
+  standard logger so the redacting formatter applies, and do not rely on
+  redaction: do not log those things in the first place.
 
 ## 4. Dependencies
 

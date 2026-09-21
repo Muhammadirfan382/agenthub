@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type {
+  AlertRecord,
   AuditEvent,
+  SecurityEvent,
+  SecurityOverview,
   Agent,
   AgentPermission,
   Approval,
@@ -187,6 +190,78 @@ const sandboxStatusShape = {
   required: z.boolean(),
   detail: z.string(),
 };
+
+export const SecurityOverviewSchema: z.ZodType<SecurityOverview> = z.object({
+  riskDistribution: z.object({
+    low: z.number(),
+    medium: z.number(),
+    high: z.number(),
+    critical: z.number(),
+  }),
+  checks: z.object({
+    passed: z.number(),
+    warning: z.number(),
+    failed: z.number(),
+    not_run: z.number(),
+  }),
+  permissions: z.array(
+    z.object({
+      capability,
+      allowed: z.number(),
+      restricted: z.number(),
+      requiresApproval: z.number(),
+      denied: z.number(),
+    }),
+  ),
+  openAlerts: z.number(),
+});
+
+export const SecurityEventSchema: z.ZodType<SecurityEvent> = z.object({
+  id,
+  severity: riskLevel,
+  type: z.string(),
+  agentId: z.string().nullable(),
+  agentName: z.string(),
+  description: z.string(),
+  detectedAt: iso,
+  status: z.enum(['open', 'investigating', 'resolved']),
+});
+
+export const AnalyticsSummarySchema = z.object({
+  executionsPerDay: z.array(z.object({ date: z.string(), value: z.number() })),
+  tokensPerDay: z.array(z.object({ date: z.string(), value: z.number() })),
+  successRate: z.number(),
+  averageDurationMs: z.number(),
+  topAgents: z.array(z.object({ agentId: id, name: z.string(), executions: z.number() })),
+  statusBreakdown: z.record(z.string(), z.number()),
+  estimatedCostUsd: z.number(),
+});
+
+export const SystemStatusSchema = z.object({
+  state: z.enum(['operational', 'degraded', 'outage']),
+  components: z.array(
+    z.object({
+      id: z.enum(['api', 'runtime', 'database', 'security', 'models', 'sandbox']),
+      name: z.string(),
+      state: z.enum(['operational', 'degraded', 'outage']),
+      detail: z.string(),
+    }),
+  ),
+  checkedAt: iso,
+});
+
+export const AlertRecordSchema: z.ZodType<AlertRecord> = z.object({
+  id,
+  rule: z.string(),
+  severity: z.enum(['info', 'warning', 'critical']),
+  state: z.enum(['firing', 'resolved']),
+  summary: z.string(),
+  detail: z.record(z.string(), z.unknown()),
+  firstSeen: iso,
+  lastSeen: iso,
+  resolvedAt: iso.nullable(),
+  occurrences: z.number(),
+});
 
 export const AuditEventSchema: z.ZodType<AuditEvent> = z.object({
   id,

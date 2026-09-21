@@ -21,6 +21,7 @@ import logging
 import time
 from typing import Any
 
+from opentelemetry.trace import SpanKind
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -29,6 +30,8 @@ from app.db.models import Agent, Execution, ExecutionApproval
 from app.llm.errors import ModelError
 from app.llm.gateway import ModelGateway
 from app.llm.types import Message, ModelResponse, ToolCall, ToolResult
+from app.observability import tracing
+from app.observability.metrics import EGRESS_REQUESTS, POLICY_DECISIONS, TOOL_CALLS
 from app.runtime import tools as tool_gateway
 from app.runtime.conversation import MAX_STORED_MESSAGES, Conversation
 from app.runtime.plan import Step, tool_policies
@@ -91,6 +94,7 @@ async def _refuse_call(
     label: str,
 ) -> ToolResult:
     await recorder.event("policy", label, detail=message)
+    TOOL_CALLS.labels(tool=call.name[:48], status=status).inc()
     await recorder.tool_call(
         tool=call.name[:48],
         capability=(policy.capability if policy and policy.capability else "unknown"),
@@ -164,6 +168,7 @@ async def _tool_step(
     verdict = policy_engine.decide(
         call.name, arguments, grant, policy_engine.AgentPolicy.from_agent(agent.security_policy)
     )
+    POLICY_DECISIONS.labels(effect=verdict.effect, rule=verdict.rule).inc()
     if verdict.effect == "deny":
         result = await _refuse_call(
             recorder,
@@ -249,11 +254,13 @@ async def _tool_step(
 
     execution.tool_call_count += 1
     if call.name in EXECUTABLE_TOOLS and settings.egress_enabled:
+        TOOL_CALLS.labels(tool=call.name, status="succeeded").inc()
         result = await _run_egress(session, recorder, execution, agent, call, arguments, settings)
         return _resolved(execution, conversation, result)
 
     # Allowed by every check - and still not executed: no implementation exists.
     message = tool_gateway.NOT_EXECUTED.format(tool=call.name)
+    TOOL_CALLS.labels(tool=call.name, status="unavailable").inc()
     await recorder.event("tool", f"{call.name} (not executed)", detail=f"Requested: {summary}")
     await recorder.tool_call(
         tool=call.name,
@@ -288,9 +295,12 @@ async def _run_egress(
 
     started = time.monotonic()
     try:
-        response = await get_egress().get(url, policy.allowed_domains)
+        with tracing.span("egress.request", {"agenthub.tool": call.name}, kind=SpanKind.CLIENT):
+            response = await get_egress().get(url, policy.allowed_domains)
     except EgressBlocked as blocked:
         duration = int((time.monotonic() - started) * 1000)
+        EGRESS_REQUESTS.labels(outcome="blocked", rule=blocked.rule).inc()
+        TOOL_CALLS.labels(tool=call.name, status="failed").inc()
         await recorder.event("policy", f"Egress blocked: {blocked.rule}", detail=blocked.message)
         await recorder.tool_call(
             tool=call.name,
@@ -316,6 +326,7 @@ async def _run_egress(
         )
 
     duration = int((time.monotonic() - started) * 1000)
+    EGRESS_REQUESTS.labels(outcome="allowed", rule="none").inc()
     size = len(response.body.encode("utf-8"))
     await recorder.event(
         "tool",

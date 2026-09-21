@@ -1,11 +1,13 @@
 import { ShieldAlert, ShieldCheck, ShieldX, TriangleAlert } from 'lucide-react';
-import { DemoBadge, DemoNotice } from '@/components/feedback/DemoNotice';
+import { DataNotice } from '@/components/feedback/DemoNotice';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { QueryState } from '@/components/feedback/QueryState';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
-import { usePolicies, useSecurityEvents, useSecurityOverview } from './api';
+import { useIsLive } from '@/services/useIsLive';
+import { useAlerts, usePolicies, useSecurityEvents, useSecurityOverview } from './api';
+import { PlatformAlerts } from './components/PlatformAlerts';
 import { RiskDistributionCard, SecurityChecksCard } from './components/SecurityOverviewCards';
 import { AlertsList, PermissionOverviewTable, PolicyList, SecurityEventsTable } from './components/SecurityTables';
 
@@ -13,21 +15,26 @@ export default function SecurityPage() {
   const overview = useSecurityOverview();
   const events = useSecurityEvents();
   const policies = usePolicies();
+  const alertsLive = useIsLive('alerts');
+  const alerts = useAlerts('firing');
 
   return (
     <>
-      <PageHeader title="Security" description="Agent risk, permissions, security checks, events and policy status." meta={<DemoBadge label="Demo security data" />} />
+      <PageHeader title="Security" description="Agent risk, permissions, security checks, events and policy status." />
 
-      <DemoNotice title="Demo security data" className="mb-6">
-        No security scanning, threat detection or policy enforcement exists yet. Everything on this page is demonstration
-        data that shows how real security analysis will be presented once the security layer is built.
-      </DemoNotice>
+      <DataNotice
+        resource="security"
+        demoTitle="Demo security data"
+        className="mb-6"
+        demo="Everything on this page is demonstration data. Connect to the backend to see your organization's agents, audit events and alerts."
+        live="Risk and permissions come from your installed agents, events from the audit log and alerts from rules the backend evaluates every minute. Policies are the protections the platform enforces for everyone."
+      />
 
       <QueryState query={overview} loading={<LoadingState label="Loading security overview…" />} errorTitle="Security overview could not be loaded">
         {(data) => (
           <>
             <section aria-label="Security summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Open alerts" value={data.openAlerts} icon={ShieldAlert} tone="warning" description="Open or investigating events" />
+              <StatCard label="Open alerts" value={data.openAlerts} icon={ShieldAlert} tone="warning" description="Firing alert rules" />
               <StatCard label="Critical-risk agents" value={data.riskDistribution.critical} icon={ShieldX} tone="danger" />
               <StatCard label="High-risk agents" value={data.riskDistribution.high} icon={TriangleAlert} tone="warning" />
               <StatCard label="Checks passed" value={data.checks.passed} icon={ShieldCheck} tone="success" description={`${data.checks.failed} failed · ${data.checks.warning} warnings`} />
@@ -60,11 +67,17 @@ export default function SecurityPage() {
 
         <div className="space-y-6">
           <Card>
-            <CardHeader title="Alerts" description="Open high and critical events." />
+            <CardHeader title="Alerts" description={alertsLive ? 'Rules that are firing now.' : 'Open high and critical events.'} />
             <div className="p-4">
-              <QueryState query={events} loading={<LoadingState variant="inline" label="Loading alerts…" />} errorTitle="Alerts could not be loaded">
-                {(rows) => <AlertsList events={rows} />}
-              </QueryState>
+              {alertsLive ? (
+                <QueryState query={alerts} loading={<LoadingState variant="inline" label="Loading alerts…" />} errorTitle="Alerts could not be loaded">
+                  {(rows) => <PlatformAlerts alerts={rows} />}
+                </QueryState>
+              ) : (
+                <QueryState query={events} loading={<LoadingState variant="inline" label="Loading alerts…" />} errorTitle="Alerts could not be loaded">
+                  {(rows) => <AlertsList events={rows} />}
+                </QueryState>
+              )}
             </div>
           </Card>
 

@@ -50,6 +50,10 @@ export const queryKeys = {
   auth: {
     session: ['auth', 'session'] as const,
   },
+  alerts: {
+    all: ['alerts'] as const,
+    list: (state?: string) => ['alerts', 'list', state ?? 'all'] as const,
+  },
   audit: {
     all: ['audit'] as const,
     list: (query: object) => ['audit', 'list', query] as const,

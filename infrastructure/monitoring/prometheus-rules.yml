@@ -1,0 +1,110 @@
+# Alert rules for AgentHub, for teams that run their own Prometheus.
+#
+# They mirror the rules AgentHub evaluates itself (backend/app/observability/
+# alerts.py) using the metrics served at /api/v1/metrics. Load them with:
+#
+#   rule_files: ["prometheus-rules.yml"]
+#
+# and scrape the backend as job "agenthub". Thresholds are starting points:
+# tune them to your traffic. Every metric used here is defined in
+# backend/app/observability/metrics.py.
+#
+# These rules were written against the metric definitions and parsed as YAML;
+# they have not been evaluated by a live Prometheus in this repository.
+
+groups:
+  - name: agenthub.availability
+    rules:
+      - alert: AgentHubDown
+        expr: up{job="agenthub"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The AgentHub backend is not answering scrapes."
+          runbook: "docs/MONITORING.md#agenthubdown"
+
+      - alert: AgentHubHighErrorRate
+        expr: |
+          sum(rate(agenthub_http_requests_total{status="5xx"}[5m]))
+            / clamp_min(sum(rate(agenthub_http_requests_total[5m])), 1e-9) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5% of requests are failing with a server error."
+          runbook: "docs/MONITORING.md#agenthubhigherrorrate"
+
+      - alert: AgentHubSlowRequests
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(agenthub_http_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The slowest 5% of requests take over two seconds."
+          runbook: "docs/MONITORING.md#agenthubslowrequests"
+
+  - name: agenthub.runtime
+    rules:
+      - alert: AgentHubRunsFailing
+        expr: sum(increase(agenthub_executions_finished_total{status="FAILED"}[15m])) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "Three or more runs failed in the last 15 minutes."
+          runbook: "docs/MONITORING.md#runs_failing"
+
+      - alert: AgentHubQueueBacklog
+        expr: agenthub_executions_queued > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Runs are queueing faster than workers claim them."
+          runbook: "docs/MONITORING.md#agenthubqueuebacklog"
+
+      - alert: AgentHubSandboxUnverified
+        expr: sum(increase(agenthub_sandbox_checks_total{result="unsafe"}[1h])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "A sandbox container failed its isolation checks."
+          runbook: "docs/MONITORING.md#sandbox_unverified"
+
+  - name: agenthub.security
+    rules:
+      - alert: AgentHubEgressBlocked
+        expr: sum(increase(agenthub_egress_requests_total{outcome="blocked"}[15m])) >= 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many outbound requests were blocked: an agent may be trying to reach where it should not."
+          runbook: "docs/MONITORING.md#egress_blocked"
+
+      - alert: AgentHubPolicyDenials
+        expr: sum(increase(agenthub_policy_decisions_total{effect="deny"}[15m])) >= 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many tool calls were refused by policy."
+          runbook: "docs/MONITORING.md#policy_denials"
+
+      - alert: AgentHubInAppCriticalAlert
+        expr: sum(agenthub_alerts_active{severity="critical"}) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "AgentHub itself has a critical alert firing; see Security in the app."
+          runbook: "docs/MONITORING.md#alerts"
+
+  - name: agenthub.models
+    rules:
+      - alert: AgentHubModelErrors
+        expr: sum(increase(agenthub_model_requests_total{outcome!~"ok|refused"}[15m])) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model requests are failing."
+          runbook: "docs/MONITORING.md#model_errors"

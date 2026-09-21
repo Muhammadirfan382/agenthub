@@ -86,8 +86,12 @@ class Workspace:
 
 def build_settings(environment: Environment = "test", **overrides: Any) -> Settings:
     # `_env_file=None` keeps a developer's local `.env` from influencing tests.
-    # Production refuses a weak password cost, so those settings keep the floor.
-    cost = MIN_PRODUCTION_COST_EXPONENT if environment == "production" else TEST_COST_EXPONENT
+    # Production refuses a weak password cost and an open metrics endpoint, so
+    # those settings meet both requirements.
+    production = environment == "production"
+    cost = MIN_PRODUCTION_COST_EXPONENT if production else TEST_COST_EXPONENT
+    if production:
+        overrides.setdefault("metrics_token", "a-test-scrape-token")
     return Settings(
         environment=environment,
         database_url="sqlite+aiosqlite://",

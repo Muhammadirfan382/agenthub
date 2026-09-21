@@ -29,6 +29,11 @@ from app.db.models import (
     Organization,
 )
 from app.llm.gateway import get_gateway
+from app.observability import tracing
+from app.observability.metrics import (
+    EXECUTIONS_STARTED,
+    SANDBOX_CHECKS,
+)
 from app.runtime.agent_loop import model_step
 from app.runtime.plan import Step, build_plan
 from app.runtime.records import ExecutionRecorder, StepOutcome, new_id
@@ -243,8 +248,12 @@ async def prepare_sandbox(
         timeout_seconds=settings.sandbox_timeout_seconds,
     )
 
-    result = await sandbox.probe(spec)
+    with tracing.span("sandbox.probe", {"agenthub.image": settings.sandbox_image}):
+        result = await sandbox.probe(spec)
     execution.sandbox_report = result.report.as_dict()
+    SANDBOX_CHECKS.labels(
+        result="isolated" if result.isolated else ("unsafe" if result.started else "unavailable")
+    ).inc()
 
     if result.isolated:
         execution.runtime = "sandbox"
@@ -329,6 +338,16 @@ async def advance(
     session: AsyncSession, execution: Execution, *, settings: Settings | None = None
 ) -> StepOutcome:
     """Runs one step of one execution and records what it did."""
+    with tracing.span(
+        "execution.step",
+        {"agenthub.execution": execution.id, "agenthub.mode": execution.mode},
+    ):
+        return await _advance(session, execution, settings=settings)
+
+
+async def _advance(
+    session: AsyncSession, execution: Execution, *, settings: Settings | None = None
+) -> StepOutcome:
     recorder = ExecutionRecorder(session, execution)
     execution.heartbeat_at = now_utc()
 
@@ -389,6 +408,7 @@ async def advance(
         if refused is not None:
             return refused
         await choose_mode(session, execution, recorder, resolved)
+        EXECUTIONS_STARTED.labels(mode=execution.mode).inc()
 
         execution.step_index += 1
         execution.status = "RUNNING"

@@ -1,4 +1,5 @@
 import { DemoBadge } from '@/components/feedback/DemoNotice';
+import { useIsLive } from '@/services/useIsLive';
 import { LoadingState } from '@/components/feedback/LoadingState';
 import { QueryState } from '@/components/feedback/QueryState';
 import { ComponentStateBadge } from '@/components/status/StatusBadges';
@@ -7,9 +8,14 @@ import { useComponentStatus } from '../api';
 
 export function SystemStatusCard() {
   const query = useComponentStatus();
+  const live = useIsLive('status');
   return (
     <Card>
-      <CardHeader title="System status" description="Simulated states for demonstration." action={<DemoBadge />} />
+      <CardHeader
+        title="System status"
+        description={live ? 'Checked by the backend when this card loads.' : 'Simulated states for demonstration.'}
+        action={live ? undefined : <DemoBadge />}
+      />
       <div className="p-4">
         <QueryState query={query} loading={<LoadingState variant="inline" label="Loading system status…" />} errorTitle="Status unavailable">
           {(components) => (
@@ -26,9 +32,11 @@ export function SystemStatusCard() {
             </ul>
           )}
         </QueryState>
-        <p className="mt-4 text-xs text-fg-subtle">
-          These are not real health checks. Live service health will be reported once the backend services exist.
-        </p>
+        {!live && (
+          <p className="mt-4 text-xs text-fg-subtle">
+            These are not real health checks. Connect to the backend to see live component status.
+          </p>
+        )}
       </div>
     </Card>
   );

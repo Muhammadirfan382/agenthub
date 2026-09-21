@@ -6,7 +6,7 @@ describe('security dashboard', () => {
   it('clearly labels the data as demonstration security data', async () => {
     renderApp('/security');
     expect(await screen.findByRole('heading', { level: 1, name: 'Security' })).toBeInTheDocument();
-    expect(screen.getByText(/No security scanning, threat detection or policy enforcement exists yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Everything on this page is demonstration data/)).toBeInTheDocument();
   });
 
   it('shows all four risk classifications with agent counts', async () => {

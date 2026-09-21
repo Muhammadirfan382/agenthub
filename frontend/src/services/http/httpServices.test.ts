@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentDraft } from '@/services/contracts';
-import type { Agent, Execution } from '@/types/domain';
+import type { Agent, AlertRecord, Execution } from '@/types/domain';
 import { httpAgentService } from './agentApi';
 import { ApiError } from './client';
 import { createHttpServices } from './createHttpServices';
 import { httpExecutionService } from './executionApi';
+import { fetchComponentStatus, httpAlertService, httpAnalyticsService, httpSecurityService } from './insightsApi';
 
 const agent: Agent = {
   id: 'agt_research_scout_1',
@@ -73,6 +74,19 @@ const execution: Execution = {
   budget: { maxRuntimeSeconds: 300, maxTokens: 50000, maxToolCalls: 20 },
   cancelRequested: false,
   pendingApprovals: 0,
+};
+
+const firingAlert: AlertRecord = {
+  id: 'alr_1',
+  rule: 'runs_failing',
+  severity: 'warning',
+  state: 'firing',
+  summary: '3 runs failed in the last 15 minutes.',
+  detail: { failed: 3 },
+  firstSeen: '2026-09-20T10:00:00Z',
+  lastSeen: '2026-09-20T10:05:00Z',
+  resolvedAt: null,
+  occurrences: 2,
 };
 
 const page = <T,>(items: T[]) => ({ items, total: items.length, limit: 200, offset: 0 });
@@ -197,6 +211,10 @@ describe('api mode services', () => {
       'installations',
       'runtime',
       'audit',
+      'security',
+      'analytics',
+      'status',
+      'alerts',
     ]);
   });
 
@@ -204,6 +222,7 @@ describe('api mode services', () => {
     stubFetch(
       { body: page([agent, { ...agent, id: 'agt_2', status: 'paused' }]) },
       { body: page([execution, { ...execution, id: 'exe_2', status: 'COMPLETED' }, { ...execution, id: 'exe_3', status: 'FAILED' }]) },
+      { body: page([firingAlert]) },
     );
 
     const summary = await createHttpServices().system.dashboardSummary();
@@ -214,6 +233,79 @@ describe('api mode services', () => {
       runningExecutions: 1,
       completedExecutions: 1,
       failedExecutions: 1,
+      securityAlerts: 1,
     });
+  });
+});
+
+describe('http insight services', () => {
+  it('reads alerts by state and resolves by id', async () => {
+    const fetchMock = stubFetch(
+      { body: page([firingAlert]) },
+      { body: { ...firingAlert, state: 'resolved', resolvedAt: '2026-09-20T11:00:00Z' } },
+    );
+
+    expect(await httpAlertService.list('firing')).toEqual([firingAlert]);
+    const resolved = await httpAlertService.resolve('alr/1');
+
+    expect(requestOf(fetchMock, 0).url).toContain('/api/v1/alerts?limit=100&state=firing');
+    expect(requestOf(fetchMock, 1).url).toContain('/api/v1/alerts/alr%2F1/resolve');
+    expect(requestOf(fetchMock, 1).init.method).toBe('POST');
+    expect(resolved.state).toBe('resolved');
+  });
+
+  it('reads component status from the live check', async () => {
+    stubFetch({
+      body: {
+        state: 'degraded',
+        checkedAt: '2026-09-20T10:00:00Z',
+        components: [
+          { id: 'database', name: 'Database', state: 'operational', detail: 'Answering queries.' },
+          { id: 'sandbox', name: 'Sandbox', state: 'degraded', detail: 'No container runtime.' },
+        ],
+      },
+    });
+
+    const components = await fetchComponentStatus();
+
+    expect(components.map((c) => [c.id, c.state])).toEqual([
+      ['database', 'operational'],
+      ['sandbox', 'degraded'],
+    ]);
+  });
+
+  it('fills statuses the backend did not report with zero', async () => {
+    stubFetch({
+      body: {
+        executionsPerDay: [{ date: '2026-09-20', value: 2 }],
+        tokensPerDay: [{ date: '2026-09-20', value: 1200 }],
+        successRate: 0.5,
+        averageDurationMs: 2000,
+        topAgents: [],
+        statusBreakdown: { COMPLETED: 1, FAILED: 1 },
+        estimatedCostUsd: 0.12,
+      },
+    });
+
+    const summary = await httpAnalyticsService.summary();
+
+    expect(summary.statusBreakdown.COMPLETED).toBe(1);
+    expect(summary.statusBreakdown.RUNNING).toBe(0);
+    expect(summary.estimatedCostUsd).toBe(0.12);
+  });
+
+  it('rejects security events that do not match the contract', async () => {
+    stubFetch({ body: [{ id: 'evt_1', severity: 'catastrophic' }] });
+
+    await expect(httpSecurityService.events()).rejects.toThrow();
+  });
+
+  it('states platform policies without fetching them', async () => {
+    const fetchMock = stubFetch();
+
+    const policies = await httpSecurityService.policies();
+
+    expect(policies.length).toBeGreaterThan(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

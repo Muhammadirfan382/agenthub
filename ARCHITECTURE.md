@@ -310,19 +310,31 @@ placeholders.
 
 ### Current implementation
 
-- `GET /api/v1/health` as a liveness signal.
-- Default Uvicorn console logs.
-- No metrics, tracing, alerting or error reporting.
+- `GET /api/v1/health` (liveness) and `GET /api/v1/health/ready` (the
+  database answers).
+- JSON logs with request, trace and span ids; messages, fields and exceptions
+  are redacted of credentials and emails (`app/observability/redaction.py`).
+- Prometheus metrics at `GET /api/v1/metrics`, from a private registry with
+  bounded labels, closed by `METRICS_TOKEN` (required in production).
+- OpenTelemetry spans: HTTP requests (continuing `traceparent`), run steps,
+  sandbox probes, model calls and outbound requests. They are exported over
+  OTLP/HTTP when `OTLP_ENDPOINT` is set, and the trace id is returned in
+  `X-Trace-Id`.
+- Alert rules evaluated per organization by the worker, stored in `alerts`,
+  shown on the Security screen, optionally sent to an HTTPS webhook through
+  the egress gateway, and mirrored in
+  `infrastructure/monitoring/prometheus-rules.yml`.
+- Live component status (`GET /api/v1/system/status`) and security and
+  analytics endpoints behind the dashboards.
+
+See [docs/MONITORING.md](docs/MONITORING.md).
 
 ### Planned architecture
 
-- Structured JSON logs with request and trace correlation IDs; secrets and personal
-  data are redacted.
-- Metrics (request rate, errors, latency, execution counts, token usage, cost) and
-  distributed tracing across API → runtime → gateways.
-- Liveness and readiness probes, including dependency checks once a database exists.
-- Security and audit dashboards and alerting (Phase 9). Tooling is chosen in that
-  phase; none is installed now.
+- Running Prometheus, Grafana and an OpenTelemetry collector as part of the
+  deployment (Phase 10), log shipping and retention, and an error reporting
+  service.
+- Paging integrations, and alerting on metrics aggregated across processes.
 
 ---
 

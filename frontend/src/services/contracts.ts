@@ -1,4 +1,5 @@
 import type {
+  AlertRecord,
   AuditEvent,
   AuditQuery,
   Agent,
@@ -170,7 +171,7 @@ export interface SecurityService {
 
 export interface SystemService {
   dashboardSummary(): Promise<DashboardSummary>;
-  /** Demonstration component states until real health checks exist (Phase 2/9). */
+  /** Live component checks in API mode (`GET /api/v1/system/status`); demonstration states otherwise. */
   componentStatus(): Promise<SystemComponentStatus[]>;
   /** Real request to the backend liveness endpoint (`GET /api/v1/health`). */
   checkBackendHealth(): Promise<BackendHealth>;
@@ -228,7 +229,18 @@ export type LiveResource =
   | 'marketplace'
   | 'installations'
   | 'runtime'
-  | 'audit';
+  | 'audit'
+  | 'security'
+  | 'analytics'
+  | 'status'
+  | 'alerts';
+
+export interface AlertService {
+  /** Firing first, newest first. */
+  list(state?: AlertRecord['state']): Promise<AlertRecord[]>;
+  /** Closes an alert by hand; it fires again if its rule still matches. */
+  resolve(id: ID): Promise<AlertRecord>;
+}
 
 export interface AuditService {
   /** Newest first. Administrators only; the backend refuses everyone else. */
@@ -250,4 +262,5 @@ export interface Services {
   installations: InstallationService;
   runtime: RuntimeService;
   audit: AuditService;
+  alerts: AlertService;
 }

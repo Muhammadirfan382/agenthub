@@ -236,6 +236,40 @@ custom seccomp profile. No independent review or penetration test was done.
 - Structured logging with redaction, metrics, distributed tracing.
 - Health and readiness checks, alerting, audit and security dashboards.
 
+**Delivered:** JSON logs carrying request, trace and span ids, with every
+message, structured field and exception line redacted of keys, tokens,
+credentials, emails and query values; a Prometheus endpoint on a private
+registry covering HTTP, runs, approvals, model calls, tokens and estimated
+cost, tool calls, policy decisions, egress, sandbox checks and alerts, with
+labels bounded by design (route templates and status classes, never ids or
+people), closed by a bearer token that production requires; OpenTelemetry
+spans for each request (continuing an incoming `traceparent`), run step,
+sandbox probe, model call and outbound request, exported over OTLP/HTTP when an
+endpoint is set, and the trace id returned in `X-Trace-Id`; a readiness probe;
+live component status for the dashboard; eight alert rules the worker evaluates
+per organization, which open, update and resolve alerts in a new `alerts`
+table, can be resolved by an administrator (audited), and are sent once each to
+an optional HTTPS webhook through the egress gateway with counts only; the same
+rules plus availability rules as a Prometheus rule file; and the Security,
+Analytics and status screens reading real data in API mode. See
+[MONITORING.md](MONITORING.md) for runbooks and [BACKEND.md](BACKEND.md) §10.
+
+**How it is verified:** redaction and log formatting as unit tests; the metrics
+endpoint, token, switch and route-template labels through the API, including
+that neither an organization id nor an email appears after traffic; trace ids
+and `traceparent` continuation on responses; each alert rule firing, updating,
+resolving and staying inside its organization; the webhook sending metadata
+only, once, and refusing an internal address; component status reporting
+missing providers and runtimes as degraded rather than green; and the insight
+endpoints counting real rows. The frontend is tested in both modes.
+
+**Deliberately not in this phase:** running Prometheus, Grafana or an
+OpenTelemetry collector (the rule file parses and names only real metrics, but
+has not been evaluated by Prometheus, and OTLP export has not reached a real
+collector), log shipping, error reporting services, long-term metric storage,
+paging integrations beyond the one webhook, and alerting on per-process
+counters across several processes.
+
 ## Phase 10: Production deployment
 
 **Objective:** run AgentHub reliably in production.

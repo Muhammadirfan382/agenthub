@@ -19,6 +19,7 @@ from app.db.models import (
     ExecutionLog,
     ExecutionToolCall,
 )
+from app.observability.metrics import EXECUTION_DURATION, EXECUTIONS_FINISHED
 from app.schemas.enums import ExecutionStatus, LogLevel, TimelineKind
 
 
@@ -117,6 +118,9 @@ def finish(execution: Execution, status: ExecutionStatus, *, summary: str | None
     execution.heartbeat_at = None
     if summary is not None:
         execution.result_summary = summary
+    EXECUTIONS_FINISHED.labels(status=status, mode=execution.mode).inc()
+    if execution.duration_ms is not None:
+        EXECUTION_DURATION.labels(status=status).observe(execution.duration_ms / 1000)
 
 
 async def fail(

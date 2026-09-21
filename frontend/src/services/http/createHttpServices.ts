@@ -6,15 +6,20 @@ import { httpAuthService, httpMemberService } from './authApi';
 import { httpAuditService } from './auditApi';
 import { httpExecutionService, httpRuntimeService } from './executionApi';
 import { httpInstallationService, httpMarketplaceService } from './registryApi';
+import {
+  fetchComponentStatus,
+  httpAlertService,
+  httpAnalyticsService,
+  httpSecurityService,
+} from './insightsApi';
 import { fetchBackendHealth } from './systemApi';
 
 /**
  * API mode.
  *
- * The backend implements identity, agents, executions and the registry
- * (versions, marketplace listings and installations). Security and analytics
- * still come from the demo services, and the UI says so: `liveResources` is
- * the single source of truth for that claim.
+ * The backend implements everything the UI reads, including security,
+ * analytics, component status and alerts (Phase 9). `liveResources` remains
+ * the single source of truth for what is real in this mode.
  */
 function createSystemService(demo: SystemService): SystemService {
   return {
@@ -22,10 +27,10 @@ function createSystemService(demo: SystemService): SystemService {
 
     /** Counted from real agents and executions, so it cannot contradict those pages. */
     async dashboardSummary(): Promise<DashboardSummary> {
-      const [agents, executions, demoSummary] = await Promise.all([
+      const [agents, executions, firing] = await Promise.all([
         httpAgentService.list(),
         httpExecutionService.list(),
-        demo.dashboardSummary(),
+        httpAlertService.list('firing'),
       ]);
       const countStatus = (...statuses: string[]) =>
         executions.filter((execution) => statuses.includes(execution.status)).length;
@@ -36,11 +41,11 @@ function createSystemService(demo: SystemService): SystemService {
         runningExecutions: countStatus('QUEUED', 'STARTING', 'RUNNING', 'WAITING_FOR_TOOL'),
         completedExecutions: countStatus('COMPLETED'),
         failedExecutions: countStatus('FAILED', 'TIMEOUT'),
-        // Security monitoring does not exist yet; this stays demonstration data.
-        securityAlerts: demoSummary.securityAlerts,
+        securityAlerts: firing.length,
       };
     },
 
+    componentStatus: fetchComponentStatus,
     checkBackendHealth: fetchBackendHealth,
   };
 }
@@ -59,6 +64,10 @@ export function createHttpServices(): Services {
       'installations',
       'runtime',
       'audit',
+      'security',
+      'analytics',
+      'status',
+      'alerts',
     ],
     agents: httpAgentService,
     executions: httpExecutionService,
@@ -69,5 +78,8 @@ export function createHttpServices(): Services {
     installations: httpInstallationService,
     runtime: httpRuntimeService,
     audit: httpAuditService,
+    security: httpSecurityService,
+    analytics: httpAnalyticsService,
+    alerts: httpAlertService,
   };
 }

@@ -20,7 +20,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 API_V1_PREFIX = "/api/v1"
 SERVICE_NAME = "agenthub-backend"
-SERVICE_VERSION = "0.6.0"
+SERVICE_VERSION = "0.9.0"
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -120,13 +120,51 @@ class Settings(BaseSettings):
     #: Per organization per UTC day, across every run, counted from the ledger.
     model_daily_token_limit_per_org: int = Field(default=2_000_000, ge=1_000)
 
-    @field_validator("anthropic_api_key", "openai_api_key", mode="before")
+    @field_validator("otlp_endpoint", "alert_webhook_url")
+    @classmethod
+    def _https_or_unset(cls, value: str) -> str:
+        # A collector may sit on plain http inside a cluster; a webhook leaves it.
+        value = value.strip()
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError("Must be an http(s) URL, or empty.")
+        return value
+
+    @field_validator("alert_webhook_url")
+    @classmethod
+    def _webhook_is_https(cls, value: str) -> str:
+        if value and not value.startswith("https://"):
+            raise ValueError("ALERT_WEBHOOK_URL must be https.")
+        return value
+
+    @field_validator("anthropic_api_key", "openai_api_key", "metrics_token", mode="before")
     @classmethod
     def _blank_key_means_unset(cls, value: object) -> object:
         # `ANTHROPIC_API_KEY=` in a .env file is "not configured", not an empty key.
         if value is None or (isinstance(value, str) and not value.strip()):
             return None
         return value
+
+    # --- Observability (Phase 9) ---------------------------------------------
+    #: Serve /metrics in Prometheus format. The endpoint carries counts only:
+    #: no organization ids, no content, nothing personal.
+    metrics_enabled: bool = True
+    #: When set, /metrics requires `Authorization: Bearer <token>`. Leave unset
+    #: on a network where only the scraper can reach the port.
+    metrics_token: SecretStr | None = None
+    #: An OTLP/HTTP collector for traces. Unset means spans stay in the process
+    #: and are only used to correlate logs.
+    otlp_endpoint: str = ""
+    #: How often the worker evaluates alert rules.
+    alert_interval_seconds: int = Field(default=60, ge=10, le=3600)
+    #: Failed runs in the last 15 minutes before `runs_failing` fires.
+    alert_failed_runs: int = Field(default=3, ge=1)
+    #: Policy refusals in the last 15 minutes before `policy_denials` fires.
+    alert_policy_denials: int = Field(default=10, ge=1)
+    #: A claimed run whose worker has not been heard from for this long is stalled.
+    alert_stalled_run_seconds: int = Field(default=300, ge=60)
+    #: Optional operator webhook for new alerts: an https URL on a public host.
+    #: It is sent alert metadata only, never run content.
+    alert_webhook_url: str = ""
 
     # --- Egress (Phase 8) ----------------------------------------------------
     #: Let `api_request` actually run: HTTPS GET to the agent's allowed domains
@@ -169,6 +207,21 @@ class Settings(BaseSettings):
                 f"{MIN_PRODUCTION_COST_EXPONENT} in production."
             )
         return self
+
+    @model_validator(mode="after")
+    def _require_metrics_token_in_production(self) -> "Settings":
+        # The scrape endpoint names no organization or person, but request
+        # volumes and failure rates are still operational detail.
+        if self.environment == "production" and self.metrics_enabled and not self.metrics_token:
+            raise ValueError(
+                "METRICS_TOKEN must be set when metrics are enabled and "
+                "ENVIRONMENT=production (or set METRICS_ENABLED=false)."
+            )
+        return self
+
+    @property
+    def service_version(self) -> str:
+        return SERVICE_VERSION
 
     @property
     def cookie_secure(self) -> bool:

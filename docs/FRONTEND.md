@@ -254,8 +254,11 @@ cache, so demo rows can never be displayed as backend data.
 
 In API mode the backend serves identity (sessions, members), agents, versions,
 marketplace listings, installations, executions and their recorded traces, the
-runtime controls, and the dashboard counts derived from them. Marketplace, security, analytics and the profile still come from demo
-data. `services.liveResources` states exactly which resources are real, and
+runtime controls, the dashboard counts derived from them, and (Phase 9) the
+security overview and events, analytics, component status and alerts.
+Platform policies on the Security page are a fixed list in
+`services/http/insightsApi.ts`, because they describe what the code enforces
+for everyone rather than per-organization data. `services.liveResources` states exactly which resources are real, and
 `useIsLive(resource)` drives the `DataNotice` on each page, so no page can keep
 claiming "demonstration data" while reading from the backend.
 
@@ -296,6 +299,7 @@ The backend's `.env` (repository root) is **not** read by the frontend.
 | Create-agent validation (required, invalid values, invalid configuration, success) | `features/agents/CreateAgentPage.test.tsx`, `features/agents/form/schema.test.ts` |
 | Execution status rendering, list filter, detail view | `features/executions/Executions.test.tsx` |
 | Security dashboard | `features/security/SecurityPage.test.tsx` |
+| Live alerts, resolving by role, live status card | `features/security/alerts.test.tsx` |
 | 404 page and route error boundary | `features/errors/Errors.test.tsx` |
 | Loading and error states (including retry) | `features/QueryStates.test.tsx` |
 | HTTP client and environment configuration | `services/http/client.test.ts` |

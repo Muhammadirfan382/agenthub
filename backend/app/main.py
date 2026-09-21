@@ -24,6 +24,9 @@ from app.core.middleware import (
 )
 from app.core.security import configure_password_cost
 from app.db.session import create_engine, create_session_factory
+from app.observability.metrics import record_build
+from app.observability.middleware import ObservabilityMiddleware
+from app.observability.tracing import configure_tracing
 from app.runtime.worker import work_loop, worker_name
 from app.services.login_guard import LoginGuard
 
@@ -92,7 +95,10 @@ def create_app(
         app.state.engine = None
         app.state.session_factory = session_factory
     # Outermost middleware runs first on the way in and last on the way out.
+    configure_tracing(resolved)
+    record_build(SERVICE_VERSION, resolved.environment)
     app.add_middleware(WriteRateLimitMiddleware, limit=resolved.write_requests_per_minute)
+    app.add_middleware(ObservabilityMiddleware)
     app.add_middleware(SecurityHeadersMiddleware, hsts=resolved.environment == "production")
     app.add_middleware(RequestContextMiddleware)
     install_error_handlers(app)

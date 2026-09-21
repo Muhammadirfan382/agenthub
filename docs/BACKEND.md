@@ -31,6 +31,7 @@ backend/
 │   ├── sandbox/            Container spec, runner and isolation report
 │   ├── llm/                Model gateway, routing, pricing, provider adapters
 │   ├── security/           Policy engine, egress gateway, untrusted content, audit
+│   ├── observability/      Metrics, tracing, redaction, HTTP middleware, alerts
 │   ├── services/           Business rules, authorization matrix, risk scoring
 │   └── main.py             create_app() application factory
 ├── scripts/create_user.py  Creates an account; there is no public sign-up
@@ -39,6 +40,7 @@ backend/
 agents/sandbox/           The sandbox image and its in-container probe
 database/migrations/      Alembic environment and versions
 infrastructure/compose/   Local PostgreSQL (docker-compose.yml)
+infrastructure/monitoring/ Prometheus alert rules
 ```
 
 **Layering rule:** routers parse and shape, services decide, repositories query.
@@ -90,6 +92,15 @@ A blank key is the same as no key. Routes are validated when settings load.
 | `WRITE_REQUESTS_PER_MINUTE` | `120` | State-changing requests per client per minute. |
 | `SECRETS_DIR` | unset | Directory of files named after settings, e.g. a Docker or Kubernetes secret mount. |
 
+| `METRICS_ENABLED` | `true` | Serve `/api/v1/metrics`. Off answers 404. |
+| `METRICS_TOKEN` | unset | Bearer token for scrapes. **Required in production** while metrics are on. |
+| `OTLP_ENDPOINT` | empty | OTLP/HTTP traces endpoint. Empty means spans exist for log correlation but are not exported. |
+| `ALERT_INTERVAL_SECONDS` | `60` | How often the worker evaluates alert rules (10–3600). |
+| `ALERT_FAILED_RUNS` | `3` | Failed runs, or failed model calls, in 15 minutes that fire an alert. |
+| `ALERT_POLICY_DENIALS` | `10` | Policy refusals, or blocked outbound requests, in 15 minutes that fire an alert. |
+| `ALERT_STALLED_RUN_SECONDS` | `300` | Silence from a claimed run before it counts as stalled. |
+| `ALERT_WEBHOOK_URL` | empty | HTTPS only. New alerts are POSTed here through the egress gateway, metadata only. |
+
 **No ambient credentials.** Only the `AGENTHUB_`-prefixed key variables are read:
 a plain `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` set machine-wide for other tools
 is ignored. Both SDK clients are pinned to the official endpoints, so
@@ -114,6 +125,14 @@ stays snake_case (`CamelModel` generates the aliases).
 | Method | Path | Auth | Notes |
 | --- | --- | --- | --- |
 | `GET` | `/health` | — | Liveness. Exposes nothing about configuration. |
+| `GET` | `/health/ready` | — | Readiness: 200 when the database answers, 503 when not. |
+| `GET` | `/metrics` | scrape token | Prometheus text format. 403 without the token when one is set; 404 when disabled. |
+| `GET` | `/system/status` | viewer | Live state of API, database, runtime, models, sandbox and security. |
+| `GET` | `/security/overview` | viewer | Risk distribution, check results and permission counts over installed agents, and firing alerts. |
+| `GET` | `/security/events` | viewer | Security-relevant audit events, mapped for display. |
+| `GET` | `/analytics/summary` | viewer | Runs and tokens per day, success rate, duration, top agents, estimated cost. `days` 1–90. |
+| `GET` | `/alerts` | viewer | Alerts, firing first. Filter by `state`. |
+| `POST` | `/alerts/{id}/resolve` | admin | Resolves by hand; audited. Fires again if its rule still matches. |
 | `POST` | `/auth/login` | — | Sets the session and CSRF cookies. Rate limited. |
 | `GET` | `/auth/session` | any role | Current user, organization, role and memberships. |
 | `POST` | `/auth/logout` | any role | Revokes the session server-side and clears the cookies. |
@@ -170,7 +189,8 @@ text, SQL or stack traces; the detail goes to the log with the request id.
 **Every response** carries `X-Request-ID` (a client-supplied one is echoed only if
 it matches `^[A-Za-z0-9._-]{1,64}$`), `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a restrictive
-`Permissions-Policy` and `Cache-Control: no-store`.
+`Permissions-Policy` and `Cache-Control: no-store`, plus `X-Trace-Id` with the
+OpenTelemetry trace id.
 
 ## 4. Authentication and authorization
 
@@ -588,7 +608,34 @@ evaluations against real models have not been run. Allowed domains are trusted
 completely. Rate limits are per process. See [THREAT_MODEL.md](THREAT_MODEL.md)
 §5 and [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
 
-## 10. Domain rules
+## 10. Observability
+
+Everything here is described for operators, with runbooks, in
+[MONITORING.md](MONITORING.md).
+
+- **Logs** (`app/core/logging.py`): one JSON object per line with `request_id`,
+  `trace_id`, `span_id` and any `extra=` fields. The message, every field and
+  the exception's last line go through `app/observability/redaction.py`.
+- **Metrics** (`app/observability/metrics.py`): a private registry, so only
+  `agenthub_*` series are served. The HTTP middleware labels by route template
+  and status class. The engine, gateway, agent loop and records module count
+  runs, model calls, tokens, cost, tool calls, policy decisions, egress and
+  sandbox checks. The worker publishes queue, running, approval and alert
+  gauges each alert interval.
+- **Traces** (`app/observability/tracing.py`): a tracer provider is installed
+  at startup in the API and the standalone worker. `span()` wraps requests,
+  `execution.step`, `sandbox.probe`, `model.complete` and `egress.request`.
+  Attributes are ids, counts and outcomes, never content.
+- **Alerts** (`app/observability/alerts.py`): `evaluate` runs eight rules per
+  organization, `apply` upserts firing alerts and resolves the rest, and
+  `notify` posts new ones to the webhook through `EgressGateway.post_json`,
+  which is the only POST the gateway allows and is never offered to agents.
+  `evaluate_all` never raises: a broken rule must not stop the worker.
+- **Insights** (`app/api/v1/insights.py`, `monitoring.py`): security overview
+  and events, analytics and component status are computed from existing rows.
+  Nothing on them is stored separately, so they cannot drift from the truth.
+
+## 11. Domain rules
 
 The backend is authoritative; the frontend's Zod rules only improve the form.
 
@@ -603,7 +650,7 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   verification is not `rejected`.
 - Executions can only be requested for an `active` agent.
 
-## 11. Database
+## 12. Database
 
 - **Runtime tables:** `execution_events`, `execution_logs`,
   `execution_tool_calls` and `execution_approvals`, all cascading from the
@@ -612,6 +659,9 @@ The backend is authoritative; the frontend's Zod rules only improve the form.
   said about its own isolation, null for runs that never had one; `mode`,
   `model_route`, `input_text`, `cost_microusd` and `conversation` for
   model-driven runs.
+- **Alerts:** `alerts`, one row per rule per organization while it fires,
+  with severity, summary, a counts-only detail document, first and last seen,
+  occurrences, whether the webhook was told, and when it resolved.
 - **Audit log:** `audit_events`, append-only, one row per security-relevant
   decision, with a key-filtered detail document (§9).
 - **Usage ledger:** `model_usage`, one row per model request with tier,
@@ -666,7 +716,7 @@ cd backend
 Four fictional agents and three execution records, safe to run twice. The
 execution rows are records of requests, not evidence that anything ran.
 
-## 12. Testing
+## 13. Testing
 
 ```powershell
 cd backend
@@ -717,6 +767,15 @@ engine and untrusted-content wrapper as pure functions (`test_policy.py`), and
 the audit log, headers, write limit and secrets directory through the API
 (`test_security_layer.py`).
 
+Monitoring is tested through the API and as units (`test_observability.py`,
+`test_alerts_and_insights.py`): redaction by shape and by name, log lines with
+their correlation ids, the metrics endpoint's format, token, switch and bounded
+labels (no organization id or email after traffic), trace ids and `traceparent`
+continuation, readiness, each alert rule firing, updating, resolving and staying
+inside its organization, hand resolution by role, the webhook's metadata-only
+payload and its refusal of an internal address, honest component status, and
+insight numbers computed from real rows.
+
 `test_containment.py` holds **adversarial evaluations**: a scripted model that
 behaves as though fully prompt-injected - exfiltrating to an attacker's host,
 reaching cloud metadata, writing instead of reading, calling tools it was never
@@ -751,7 +810,7 @@ cd backend
 .\.venv\Scripts\python.exe -m pytest -m sandbox
 ```
 
-## 13. Security status
+## 14. Security status
 
 Implemented: a policy engine that enforces every agent's declared security
 policy before any action, an egress gateway that is the only way a request
@@ -759,12 +818,14 @@ leaves the server (allow-listed hosts, public addresses only, pinned
 connections, no redirects, bounded), an append-only audit log of security
 decisions, a strict CSP and security headers on every response, per-client
 write rate limiting, secrets from file mounts, and dependency and secret
-scanning with SHA-pinned actions in CI; a model gateway that keeps provider
+scanning with SHA-pinned actions in CI; redacted logs, metrics with bounded
+labels behind a token that production requires, traces without content, and
+alerts on failing runs, policy and egress spikes, sandbox failures and spend; a model gateway that keeps provider
 credentials server-side, never
 logs prompts, answers or keys, and meters every request against per-organization
 rate and daily token limits; a tool gateway that checks every model tool call
 against the agent's grants, a strict schema and human approval, and executes
-none; model output treated as data throughout; a per-run container that is
+only `api_request`, through the egress gateway; model output treated as data throughout; a per-run container that is
 ephemeral, non-root, capability-free, read-only, network-less and
 resource-limited, checked from the inside before every run and failing the run
 when it does not hold, budgets enforced per run,
@@ -782,7 +843,7 @@ logs, masked database URLs, an explicit refusal to start in production without
 throughout.
 
 **Not implemented yet:** MFA and SSO (password sign-in is the only method), email
-delivery and therefore password reset and email verification, an audit log, CORS
+delivery and therefore password reset and email verification, CORS
 configuration for a separate frontend origin, shared-store rate limiting for
 multiple workers, executing any tool other than `api_request`, prompt-injection
 defences beyond containment (a hijacked agent is bounded, not prevented from
@@ -791,8 +852,10 @@ seccomp profile, and vault-based secret management. Real model calls are tested
 against scripted stand-ins only: no provider was called while this phase was
 built, because no credentials were available.
 Real-container isolation is verified only in CI: it was not exercised on the
-machine this phase was built on, which has no container runtime. Grants and policies are checked
-before every tool call, but no tool runs, so they are enforced against
-requests rather than actions. Verification is a stored label, not the result of a
+machine this phase was built on, which has no container runtime. Grants and
+policies are checked before every tool call; only `api_request` runs, so for
+every other tool they are enforced against requests rather than actions. The
+Prometheus rules and OTLP export have not run against a real Prometheus or
+collector. Verification is a stored label, not the result of a
 review anyone performed. Nothing here has been penetration-tested or reviewed by
 anyone outside this repository.

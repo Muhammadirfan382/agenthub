@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from tests.conftest import ClientFactory
@@ -12,7 +13,7 @@ def test_health_reports_backend_running(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "agenthub-backend",
-        "version": "0.6.0",
+        "version": "0.9.0",
         "message": "AgentHub backend is running.",
     }
 
@@ -48,9 +49,12 @@ def test_api_docs_enabled_in_development(make_client: ClientFactory) -> None:
 
 
 def test_settings_default_to_production() -> None:
-    # Production also demands DATABASE_URL, so supply a throwaway one to read the default.
+    # Production also demands DATABASE_URL and a metrics token, so supply
+    # throwaway ones to read the default.
     settings = Settings(
-        _env_file=None, database_url="postgresql+asyncpg://user@db.invalid/agenthub"
+        _env_file=None,
+        database_url="postgresql+asyncpg://user@db.invalid/agenthub",
+        metrics_token=SecretStr("a-test-scrape-token"),
     )
 
     assert settings.environment == "production"

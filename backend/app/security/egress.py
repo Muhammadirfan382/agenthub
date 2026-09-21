@@ -26,7 +26,7 @@ import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx2
@@ -174,6 +174,16 @@ class EgressGateway:
         self._resolve = resolver if callable(resolver) else resolve
 
     async def get(self, url: str, allowed_domains: list[str]) -> EgressResponse:
+        return await self._request("GET", url, allowed_domains)
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        allowed_domains: list[str],
+        *,
+        json_body: dict[str, Any] | None = None,
+    ) -> EgressResponse:
         checked = check_url(url, allowed_domains)
         addresses = await self._resolve(checked.host)
         blocked = [address for address in addresses if not is_public_address(address)]
@@ -193,13 +203,14 @@ class EgressGateway:
         ) as client:
             try:
                 async with client.stream(
-                    "GET",
+                    method,
                     _pinned_url(address, checked.path_and_query),
                     headers={
                         "Host": checked.host,
                         "User-Agent": USER_AGENT,
                         "Accept": "application/json, text/*;q=0.9",
                     },
+                    json=json_body,
                     extensions={"sni_hostname": checked.host},
                 ) as response:
                     if 300 <= response.status_code < 400:
@@ -237,6 +248,17 @@ class EgressGateway:
             truncated=truncated,
             address=address,
         )
+
+    async def post_json(
+        self, url: str, payload: dict[str, Any], allowed_domains: list[str]
+    ) -> EgressResponse:
+        """Sends one JSON document, under exactly the rules `get` uses.
+
+        For the operator's own webhook (`ALERT_WEBHOOK_URL`), never for anything
+        an agent asked for: the policy engine refuses every non-GET an agent
+        proposes, and nothing routes an agent's request here.
+        """
+        return await self._request("POST", url, allowed_domains, json_body=payload)
 
 
 # --- choosing the gateway ----------------------------------------------------
