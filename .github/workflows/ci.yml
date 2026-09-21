@@ -435,24 +435,7 @@ jobs:
           compose up --detach --wait
 
       - name: Smoke test through the edge
-        run: |
-          curl -fsS http://localhost:8080/api/v1/health/ready
-          curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
-          # A client route serves the app shell.
-          curl -fsS http://localhost:8080/agents/does-not-exist | grep -q '<div id="root">'
-          # The page may not be framed.
-          curl -fsSI http://localhost:8080/ | grep -qi "^content-security-policy: frame-ancestors 'none'"
-          # Metrics are internal only.
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/metrics)" = 404
-          # Prometheus scrapes the API with the token.
-          for _ in $(seq 1 20); do
-            curl -fsS 'http://localhost:9090/api/v1/targets?state=active' \
-              | jq -e '.data.activeTargets[] | select(.labels.job == "agenthub" and .health == "up")' \
-              > /dev/null && exit 0
-            sleep 3
-          done
-          echo "Prometheus never scraped the API" >&2
-          exit 1
+        run: bash .github/scripts/smoke_test.sh http://localhost:8080 http://localhost:9090
 
       - name: Create a throwaway load-test account
         working-directory: infrastructure/deployment
