@@ -11,7 +11,7 @@
 # It is never run with a mounted socket, a host path, or the host's
 # environment: see backend/app/sandbox/spec.py for how it is started.
 
-FROM python:3.13-alpine3.21
+FROM python:3.14-alpine3.21
 
 # A fixed, unprivileged account. 65532 is the conventional "nonroot" id, and
 # using a number rather than a name means the container cannot be started as
