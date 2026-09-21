@@ -480,10 +480,16 @@ jobs:
       - name: Show service logs on failure
         if: failure()
         working-directory: infrastructure/deployment
+        # Diagnostic only: when the stack never started there is nothing to
+        # show, and that must not add a second, misleading failure.
         run: |
+          if [ -z "${AGENTHUB_CONFIG_DIR:-}" ] || [ ! -f "$AGENTHUB_CONFIG_DIR/release.env" ]; then
+            echo "The stack was not started; no service logs."
+            exit 0
+          fi
           docker compose --project-name agenthub -f compose.yml -f compose.ci.yml \
             --env-file "$AGENTHUB_CONFIG_DIR/release.env" --env-file "$AGENTHUB_CONFIG_DIR/agenthub.env" \
-            logs --no-color --tail 200
+            logs --no-color --tail 200 || true
 
       - name: Save the images for publishing
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

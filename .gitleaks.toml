@@ -1,0 +1,21 @@
+# gitleaks configuration: the default rules, plus reviewed false positives.
+#
+# Every entry below names one exact line already in history and says why it is
+# not a secret. Never add a pattern broad enough to hide a real one, and never
+# allow-list a real credential: rotate it instead.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Reviewed false positives of the generic key rule"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = [
+  # backend/tests/test_sandbox_probe.py: the public OpenPGP fingerprint of the
+  # CPython release signing key, which the official python image sets as
+  # GPG_KEY. The test uses it as an example of a harmless environment variable.
+  '''"GPG_KEY": "A035C8C19219BA821ECEA86B64E628F8D684696D"''',
+  # backend/app/api/v1/auth.py: a keyword argument, not a value.
+  '''context=auth, organization_id=body\.organization_id''',
+]
