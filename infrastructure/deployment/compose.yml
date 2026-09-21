@@ -131,7 +131,7 @@ services:
   # backups, failover and patching) is the recommended production choice.
   postgres:
     <<: *hardening
-    image: postgres:17.11-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+    image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     profiles: [bundled-db]
     # The image's own postgres account; running as it means the entrypoint
     # needs no capabilities to change users or ownership.
