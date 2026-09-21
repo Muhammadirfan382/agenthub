@@ -366,12 +366,16 @@ jobs:
           tar -xzf "$archive" trivy
           sudo install -m 0755 trivy /usr/local/bin/trivy
 
+      # Every image is scanned before deciding, and the findings go to the
+      # job summary and annotations, so they can be read without the log.
       - name: Scan the images for known vulnerabilities
         run: |
-          for image in agenthub-backend:ci agenthub-web:ci agenthub-sandbox:ci; do
+          for name in backend web sandbox; do
             trivy image --quiet --scanners vuln --ignore-unfixed \
-              --severity HIGH,CRITICAL --exit-code 1 "$image"
+              --severity HIGH,CRITICAL --format json \
+              --output "trivy-$name.json" "agenthub-$name:ci"
           done
+          python3 .github/scripts/trivy_report.py trivy-backend.json trivy-web.json trivy-sandbox.json
 
       # Dockerfiles only: Trivy has no compose scanner, and the compose
       # hardening is asserted by the smoke test running under it instead.
