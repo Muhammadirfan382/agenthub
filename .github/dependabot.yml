@@ -19,11 +19,28 @@ updates:
     schedule:
       interval: weekly
 
-  # Base images, pinned by digest in the Dockerfiles.
+  # Release image bases, pinned by digest. Patch updates (and Caddy) flow
+  # freely; the ignores below are upgrades that need a plan, not a merge.
   - package-ecosystem: docker
-    directories:
-      - /infrastructure/docker
-      - /agents/sandbox
+    directory: /infrastructure/docker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # The backend image's Python must equal the worker hosts' system Python
+      # (Debian 13: 3.13): the deploy installs the image's wheels there.
+      # Move both together, deliberately (docs/DEPLOYMENT.md).
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      # Build-time only, but a new Node major is tested on its own, not merged
+      # as routine.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+
+  # The sandbox image shares nothing with the hosts, so its base may move on
+  # any version; CI's real-container job checks every isolation guarantee.
+  - package-ecosystem: docker
+    directory: /agents/sandbox
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -34,3 +51,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # A PostgreSQL major cannot open the previous major's data directory:
+      # it needs a planned upgrade (dump and restore, or pg_upgrade). Keep
+      # POSTGRES_TOOLS_IMAGE in infrastructure/deployment/bin/lib.sh on the
+      # same version as this one.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
