@@ -98,15 +98,29 @@ try {
     }
 } finally { Pop-Location }
 
-# --- Start both servers in their own windows --------------------------------------
-Step 'Starting the backend at http://127.0.0.1:8000'
-$backendCommand = "Set-Location -LiteralPath '$Backend'; `$host.UI.RawUI.WindowTitle = 'AgentHub backend'; " +
-    "& '$Python' -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000"
-Start-Process powershell -ArgumentList '-NoExit', '-Command', $backendCommand | Out-Null
+# --- Start whichever server is not already running, each in its own window --------
+# Re-running the script after closing one window restarts only that one; a
+# second copy on a busy port would just fail.
+function Test-Listening([int]$Port) {
+    [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
 
-Step 'Starting the web app at http://127.0.0.1:5173'
-$frontendCommand = "Set-Location -LiteralPath '$Frontend'; `$host.UI.RawUI.WindowTitle = 'AgentHub web app'; npm run dev"
-Start-Process powershell -ArgumentList '-NoExit', '-Command', $frontendCommand | Out-Null
+if (Test-Listening 8000) {
+    Step 'The backend is already running at http://127.0.0.1:8000'
+} else {
+    Step 'Starting the backend at http://127.0.0.1:8000'
+    $backendCommand = "Set-Location -LiteralPath '$Backend'; `$host.UI.RawUI.WindowTitle = 'AgentHub backend'; " +
+        "& '$Python' -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000"
+    Start-Process powershell -ArgumentList '-NoExit', '-Command', $backendCommand | Out-Null
+}
+
+if (Test-Listening 5173) {
+    Step 'The web app is already running at http://127.0.0.1:5173'
+} else {
+    Step 'Starting the web app at http://127.0.0.1:5173'
+    $frontendCommand = "Set-Location -LiteralPath '$Frontend'; `$host.UI.RawUI.WindowTitle = 'AgentHub web app'; npm run dev"
+    Start-Process powershell -ArgumentList '-NoExit', '-Command', $frontendCommand | Out-Null
+}
 
 # --- Wait until it answers, then open the browser ---------------------------------
 Step 'Waiting for the backend to answer'
