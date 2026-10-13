@@ -20,7 +20,7 @@
 # whose system Python is 3.13, so the wheels built here install there.
 # Base images are pinned by digest; Dependabot proposes updates.
 
-FROM python:3.13.15-slim-trixie@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS build
+FROM python:3.13.16-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS build
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -36,7 +36,7 @@ RUN python -m pip wheel --wheel-dir /wheels --requirement requirements.txt \
     && /opt/venv/bin/pip install --no-index --find-links /wheels --requirement requirements.txt
 
 
-FROM python:3.13.15-slim-trixie@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS runtime
+FROM python:3.13.16-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime
 
 ARG REVISION=unknown
 ARG SOURCE=unknown
