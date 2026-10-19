@@ -13,7 +13,7 @@
 
 # Pinned by digest like every other base image; Dependabot proposes updates.
 # Alpine 3.21 shipped an OpenSSL with known HIGH/CRITICAL fixes pending.
-FROM python:3.13.15-alpine3.24@sha256:1a63a53928ce53d2b0baf08092a703f4840ac5dfbd61fd48802dbf48e08c801e
+FROM python:3.14.8-alpine3.24@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
 
 # A fixed, unprivileged account. 65532 is the conventional "nonroot" id, and
 # using a number rather than a name means the container cannot be started as
