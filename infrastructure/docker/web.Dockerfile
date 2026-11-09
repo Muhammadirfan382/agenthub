@@ -59,7 +59,7 @@ RUN go mod init agenthub.local/caddy \
     && /out/caddy version
 
 
-FROM caddy:2.11.4-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e AS runtime
+FROM caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee AS runtime
 
 ARG REVISION=unknown
 ARG SOURCE=unknown
