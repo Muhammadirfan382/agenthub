@@ -28,7 +28,7 @@ RUN npm run build
 # This compiles the same Caddy release with a patched Go and the patched
 # library versions Caddy's own main branch has moved to. Every version is
 # explicit, and Go verifies each module against its checksum database.
-FROM golang:1.26.8-alpine3.24@sha256:51a7c389a5ddaf82f527191a1e9bff9928655130a44e4975dd1d7e0acf59f1ae AS caddy
+FROM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS caddy
 
 ENV CGO_ENABLED=0 \
     GOTOOLCHAIN=local \
